@@ -1,3 +1,17 @@
+# Monorepo: Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+.venv/
+venv/
+dist/
+.pytest_cache/
+.DS_Store
+.env
+.env.local
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
