@@ -10,7 +10,7 @@ from app.core.security import (
 )
 from app.db import get_db
 from app.models import User
-from app.schemas import Token, UserCreate, UserLogin, UserRead
+from app.schemas import Token, UserCreate, UserRead
 
 
 router = APIRouter()
@@ -52,4 +52,3 @@ def login(user_in: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(
 @router.get("/me", response_model=UserRead)
 def read_me(current_user: User = Depends(get_current_user)) -> UserRead:
     return current_user
-

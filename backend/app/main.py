@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api import auth, health
+from app.api import auth, health, inventory
 from app.db import Base, engine
 
 app = FastAPI(
@@ -23,6 +23,7 @@ def on_startup() -> None:
 
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
+app.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 
 
 @app.get("/")
