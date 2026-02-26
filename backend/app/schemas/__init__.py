@@ -1,1 +1,10 @@
-# Pydantic schemas (to be added in Milestone 2)
+from app.schemas.user import UserBase, UserCreate, UserRead, UserLogin, Token, TokenPayload
+
+__all__ = [
+    "UserBase",
+    "UserCreate",
+    "UserRead",
+    "UserLogin",
+    "Token",
+    "TokenPayload",
+]
