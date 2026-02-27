@@ -14,6 +14,7 @@ class UserCreate(UserBase):
 
 class UserRead(UserBase):
     id: int
+    timezone: str
     created_at: datetime
 
     class Config:
@@ -33,3 +34,6 @@ class Token(BaseModel):
 class TokenPayload(BaseModel):
     sub: Optional[str] = None
 
+
+class UserTimezoneUpdate(BaseModel):
+    timezone: str

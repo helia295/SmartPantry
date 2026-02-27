@@ -1,3 +1,5 @@
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
@@ -10,7 +12,7 @@ from app.core.security import (
 )
 from app.db import get_db
 from app.models import User
-from app.schemas import Token, UserCreate, UserRead
+from app.schemas import Token, UserCreate, UserRead, UserTimezoneUpdate
 
 
 router = APIRouter()
@@ -51,4 +53,26 @@ def login(user_in: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(
 
 @router.get("/me", response_model=UserRead)
 def read_me(current_user: User = Depends(get_current_user)) -> UserRead:
+    return current_user
+
+
+@router.patch("/me/timezone", response_model=UserRead)
+def update_timezone(
+    timezone_in: UserTimezoneUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UserRead:
+    timezone_value = timezone_in.timezone.strip()
+    try:
+        ZoneInfo(timezone_value)
+    except ZoneInfoNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid timezone",
+        )
+
+    current_user.timezone = timezone_value
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
     return current_user

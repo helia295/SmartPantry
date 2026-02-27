@@ -3,7 +3,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.db import Base, engine
+from app.db import Base, engine, ensure_sqlite_schema_compatibility
 from app.main import app
 
 
@@ -17,6 +17,7 @@ def create_test_tables():
     on startup events.
     """
     Base.metadata.create_all(bind=engine)
+    ensure_sqlite_schema_compatibility()
     yield
 
 
@@ -66,3 +67,33 @@ async def test_register_and_login_and_me(client: AsyncClient):
     assert r.status_code == 200
     me = r.json()
     assert me["email"] == email
+    assert me["timezone"] == "UTC"
+
+
+@pytest.mark.asyncio
+async def test_update_timezone(client: AsyncClient):
+    email = unique_email()
+    password = "testpassword123"
+
+    register_res = await client.post(
+        "/auth/register",
+        json={"email": email, "password": password},
+    )
+    assert register_res.status_code == 201
+
+    login_res = await client.post(
+        "/auth/login",
+        data={"username": email, "password": password},
+    )
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    update_res = await client.patch(
+        "/auth/me/timezone",
+        headers=headers,
+        json={"timezone": "America/New_York"},
+    )
+    assert update_res.status_code == 200
+    updated = update_res.json()
+    assert updated["timezone"] == "America/New_York"

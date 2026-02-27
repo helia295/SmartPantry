@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from app.api import auth, health, inventory
-from app.db import Base, engine
+from app.db import Base, engine, ensure_sqlite_schema_compatibility
 
 app = FastAPI(
     title="SmartPantry API",
@@ -19,6 +19,7 @@ def on_startup() -> None:
     Later this can be replaced by migrations when we move to Postgres.
     """
     Base.metadata.create_all(bind=engine)
+    ensure_sqlite_schema_compatibility()
 
 
 app.include_router(health.router, prefix="/health", tags=["health"])

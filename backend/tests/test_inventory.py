@@ -3,13 +3,14 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.db import Base, engine
+from app.db import Base, engine, ensure_sqlite_schema_compatibility
 from app.main import app
 
 
 @pytest.fixture(scope="session", autouse=True)
 def create_test_tables():
     Base.metadata.create_all(bind=engine)
+    ensure_sqlite_schema_compatibility()
     yield
 
 
@@ -56,6 +57,7 @@ async def test_inventory_crud_flow(client: AsyncClient):
     created = create_res.json()
     assert created["name"] == "Black Beans"
     assert created["normalized_name"] == "black beans"
+    assert created["created_at"] is not None
     item_id = created["id"]
 
     list_res = await client.get("/inventory", headers=headers)

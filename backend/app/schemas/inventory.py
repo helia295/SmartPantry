@@ -28,6 +28,7 @@ class InventoryItemRead(InventoryItemBase):
     id: int
     user_id: int
     normalized_name: str
+    created_at: Optional[datetime] = None
     last_updated: datetime
 
     class Config:
