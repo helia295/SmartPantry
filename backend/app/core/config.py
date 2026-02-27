@@ -27,8 +27,25 @@ class Settings:
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
     )
 
+    # Storage provider (local, r2).
+    storage_provider: str = os.getenv("STORAGE_PROVIDER", "local")
+
+    # Upload constraints and retention.
+    max_upload_images: int = int(os.getenv("MAX_UPLOAD_IMAGES", "3"))
+    max_image_size_mb: int = int(os.getenv("MAX_IMAGE_SIZE_MB", "5"))
+    image_retention_days: int = int(os.getenv("IMAGE_RETENTION_DAYS", "7"))
+
+    # Local storage path for development fallback.
+    local_storage_dir: str = os.getenv("LOCAL_STORAGE_DIR", "./storage")
+
+    # Cloudflare R2 configuration.
+    cf_account_id: str = os.getenv("CF_ACCOUNT_ID", "")
+    r2_bucket_name: str = os.getenv("R2_BUCKET_NAME", "")
+    r2_access_key_id: str = os.getenv("R2_ACCESS_KEY_ID", "")
+    r2_secret_access_key: str = os.getenv("R2_SECRET_ACCESS_KEY", "")
+    r2_endpoint: str = os.getenv("R2_ENDPOINT", "")
+
 
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
-

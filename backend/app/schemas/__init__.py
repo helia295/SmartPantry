@@ -8,6 +8,12 @@ from app.schemas.user import (
     UserTimezoneUpdate,
 )
 from app.schemas.inventory import InventoryItemCreate, InventoryItemRead, InventoryItemUpdate
+from app.schemas.image import (
+    DetectionSessionRead,
+    ImageRead,
+    ImageUploadResult,
+    ImageUploadResponse,
+)
 
 __all__ = [
     "UserBase",
@@ -20,4 +26,8 @@ __all__ = [
     "InventoryItemCreate",
     "InventoryItemRead",
     "InventoryItemUpdate",
+    "DetectionSessionRead",
+    "ImageRead",
+    "ImageUploadResult",
+    "ImageUploadResponse",
 ]
