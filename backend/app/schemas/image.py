@@ -18,6 +18,20 @@ class DetectionSessionRead(BaseModel):
         from_attributes = True
 
 
+class DetectionProposalRead(BaseModel):
+    id: int
+    session_id: int
+    label_raw: str
+    label_normalized: str
+    confidence: Optional[float] = None
+    quantity_suggested: Optional[float] = None
+    quantity_unit: Optional[str] = None
+    state: str
+
+    class Config:
+        from_attributes = True
+
+
 class ImageRead(BaseModel):
     id: int
     user_id: int
@@ -40,3 +54,12 @@ class ImageUploadResult(BaseModel):
 
 class ImageUploadResponse(BaseModel):
     results: list[ImageUploadResult]
+
+
+class ImageListResponse(BaseModel):
+    results: list[ImageRead]
+
+
+class DetectionSessionDetailResponse(BaseModel):
+    session: DetectionSessionRead
+    proposals: list[DetectionProposalRead]

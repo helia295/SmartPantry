@@ -85,7 +85,8 @@ async def test_upload_images_success(client: AsyncClient):
     for row in body["results"]:
         assert row["image"]["id"] > 0
         assert row["image"]["storage_key"].startswith("users/")
-        assert row["detection_session"]["status"] == "pending"
+        assert row["detection_session"]["status"] == "completed"
+        assert row["detection_session"]["model_version"] == "mock-v0"
 
 
 @pytest.mark.asyncio
@@ -118,3 +119,37 @@ async def test_upload_images_rejects_invalid_content_type(client: AsyncClient):
     res = await client.post("/images", headers=headers, files=files)
     assert res.status_code == 400
     assert "Unsupported content type" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_list_images_returns_uploaded_items(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    files = [("files", ("pantry.jpg", b"abc123", "image/jpeg"))]
+
+    upload_res = await client.post("/images", headers=headers, files=files)
+    assert upload_res.status_code == 201
+
+    list_res = await client.get("/images", headers=headers)
+    assert list_res.status_code == 200
+    rows = list_res.json()["results"]
+    assert len(rows) >= 1
+    assert rows[0]["storage_key"].startswith("users/")
+
+
+@pytest.mark.asyncio
+async def test_get_detection_session_returns_proposals(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    files = [("files", ("milk_carton.jpg", b"abc123", "image/jpeg"))]
+
+    upload_res = await client.post("/images", headers=headers, files=files)
+    assert upload_res.status_code == 201
+    session_id = upload_res.json()["results"][0]["detection_session"]["id"]
+
+    session_res = await client.get(f"/detections/{session_id}", headers=headers)
+    assert session_res.status_code == 200
+    payload = session_res.json()
+    assert payload["session"]["status"] == "completed"
+    assert len(payload["proposals"]) == 1
+    assert payload["proposals"][0]["state"] == "pending"

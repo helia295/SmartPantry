@@ -10,8 +10,13 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.security import get_current_user
 from app.db import get_db
-from app.models import DetectionSession, Image, User
-from app.schemas import ImageUploadResponse, ImageUploadResult
+from app.models import DetectionProposal, DetectionSession, Image, User
+from app.schemas import (
+    ImageListResponse,
+    ImageUploadResponse,
+    ImageUploadResult,
+)
+from app.services.detection import run_mock_detection
 from app.services.storage import get_storage_service
 
 
@@ -23,6 +28,25 @@ ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 def build_storage_key(user_id: int, original_name: str) -> str:
     safe_name = Path(original_name).name.replace(" ", "_")
     return f"users/{user_id}/images/{uuid4().hex}_{safe_name}"
+
+
+@router.get("", response_model=ImageListResponse)
+def list_images(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ImageListResponse:
+    now = datetime.now(timezone.utc)
+    rows = (
+        db.query(Image)
+        .filter(
+            Image.user_id == current_user.id,
+            Image.deleted_at.is_(None),
+            Image.expires_at > now,
+        )
+        .order_by(Image.created_at.desc())
+        .all()
+    )
+    return ImageListResponse(results=rows)
 
 
 @router.post("", response_model=ImageUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -84,7 +108,18 @@ async def upload_images(
                 user_id=current_user.id,
                 image_id=image.id,
                 status="pending",
+                model_version="mock-v0",
             )
+            db.add(session)
+            db.flush()
+
+            # Placeholder detection for Milestone 4 scaffolding.
+            mock = run_mock_detection(image.original_filename)
+            proposal = DetectionProposal(session_id=session.id, **mock)
+            db.add(proposal)
+
+            session.status = "completed"
+            session.completed_at = datetime.now(timezone.utc)
             db.add(session)
             db.flush()
 
