@@ -76,6 +76,7 @@ db.sqlite3
 db.sqlite3-journal
 smartpantry.db
 smartpantry.db-journal
+backend/storage/
 
 # Flask stuff:
 instance/
