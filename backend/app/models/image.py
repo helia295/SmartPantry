@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -47,3 +47,18 @@ class DetectionSession(Base):
     )
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+
+class DetectionProposal(Base):
+    __tablename__ = "detection_proposals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("detection_sessions.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    label_raw: Mapped[str] = mapped_column(String(255), nullable=False)
+    label_normalized: Mapped[str] = mapped_column(String(255), nullable=False)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    quantity_suggested: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    quantity_unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
