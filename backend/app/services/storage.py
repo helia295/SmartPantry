@@ -15,6 +15,9 @@ class StorageService:
     def delete(self, storage_key: str) -> None:
         raise NotImplementedError
 
+    def read_bytes(self, storage_key: str) -> bytes:
+        raise NotImplementedError
+
 
 class LocalStorageService(StorageService):
     def __init__(self, base_dir: str) -> None:
@@ -33,6 +36,10 @@ class LocalStorageService(StorageService):
         path = self._resolve_path(storage_key)
         if path.exists():
             path.unlink()
+
+    def read_bytes(self, storage_key: str) -> bytes:
+        path = self._resolve_path(storage_key)
+        return path.read_bytes()
 
 
 class R2StorageService(StorageService):
@@ -63,6 +70,10 @@ class R2StorageService(StorageService):
 
     def delete(self, storage_key: str) -> None:
         self.client.delete_object(Bucket=self.bucket_name, Key=storage_key)
+
+    def read_bytes(self, storage_key: str) -> bytes:
+        response = self.client.get_object(Bucket=self.bucket_name, Key=storage_key)
+        return response["Body"].read()
 
 
 def get_storage_service() -> StorageService:
