@@ -30,12 +30,14 @@ def force_local_storage():
     original_dir = settings.local_storage_dir
     original_max = settings.max_upload_images
     original_max_size = settings.max_image_size_mb
+    original_detection_provider = settings.detection_provider
     storage_dir = "/tmp/smartpantry-test-storage"
 
     settings.storage_provider = "local"
     settings.local_storage_dir = storage_dir
     settings.max_upload_images = 3
     settings.max_image_size_mb = 5
+    settings.detection_provider = "mock"
 
     Path(storage_dir).mkdir(parents=True, exist_ok=True)
     yield
@@ -44,6 +46,7 @@ def force_local_storage():
     settings.local_storage_dir = original_dir
     settings.max_upload_images = original_max
     settings.max_image_size_mb = original_max_size
+    settings.detection_provider = original_detection_provider
     shutil.rmtree(storage_dir, ignore_errors=True)
 
 

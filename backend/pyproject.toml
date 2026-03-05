@@ -22,6 +22,9 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "httpx>=0.26.0",
 ]
+ml = [
+    "ultralytics>=8.2.0",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -42,6 +42,14 @@ class Settings:
     max_image_size_mb: int = int(os.getenv("MAX_IMAGE_SIZE_MB", "5"))
     image_retention_days: int = int(os.getenv("IMAGE_RETENTION_DAYS", "7"))
 
+    # Detection provider configuration.
+    # Keep mock as default so local dev and CI remain lightweight.
+    detection_provider: str = os.getenv("DETECTION_PROVIDER", "mock")
+    yolo_model_name: str = os.getenv("YOLO_MODEL_NAME", "yolov8n.pt")
+    detection_confidence_threshold: float = float(
+        os.getenv("DETECTION_CONFIDENCE_THRESHOLD", "0.35")
+    )
+
     # Local storage path for development fallback.
     local_storage_dir: str = os.getenv("LOCAL_STORAGE_DIR", "./storage")
 
