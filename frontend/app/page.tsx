@@ -78,6 +78,7 @@ type ReviewFrame = {
   imageUrl: string;
   proposals: DetectionProposal[];
 };
+type ReviewMode = "grouped" | "boxes";
 
 const UNIT_OPTIONS: Option[] = [
   { value: "count", label: "Count" },
@@ -184,6 +185,7 @@ export default function Home() {
   const [reviewFrames, setReviewFrames] = useState<ReviewFrame[]>([]);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [activeProposalIndex, setActiveProposalIndex] = useState(0);
+  const [reviewMode, setReviewMode] = useState<ReviewMode>("grouped");
   const [manualPointMode, setManualPointMode] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -543,6 +545,22 @@ export default function Home() {
     return URL.createObjectURL(blob);
   }
 
+  async function fetchDetectionProposals(
+    sessionId: number,
+    mode: ReviewMode = reviewMode
+  ): Promise<DetectionProposal[]> {
+    const detectionRes = await fetch(`${API_BASE}/detections/${sessionId}?view=${mode}`, {
+      headers: authHeaders(),
+    });
+    if (!detectionRes.ok) {
+      throw new Error(`Detection session ${sessionId} could not be loaded`);
+    }
+    const detail = (await detectionRes.json()) as {
+      proposals: DetectionProposal[];
+    };
+    return detail.proposals;
+  }
+
   async function uploadAndAnalyze() {
     if (!token) {
       setMessage("Log in first.");
@@ -574,22 +592,14 @@ export default function Home() {
     const payload: { results: UploadResult[] } = await res.json();
 
     const framePromises = payload.results.map(async (row) => {
-      const detectionRes = await fetch(`${API_BASE}/detections/${row.detection_session.id}`, {
-        headers: authHeaders(),
-      });
-      if (!detectionRes.ok) {
-        throw new Error(`Detection session ${row.detection_session.id} could not be loaded`);
-      }
-      const detail = (await detectionRes.json()) as {
-        proposals: DetectionProposal[];
-      };
+      const proposals = await fetchDetectionProposals(row.detection_session.id, reviewMode);
       const imageUrl = await fetchImageObjectUrl(row.image.id);
 
       return {
         image: row.image,
         sessionId: row.detection_session.id,
         imageUrl,
-        proposals: detail.proposals,
+        proposals,
       } as ReviewFrame;
     });
 
@@ -757,6 +767,24 @@ export default function Home() {
     setMessage("Manual proposal added. Review and confirm it.");
   }
 
+  async function changeReviewMode(mode: ReviewMode) {
+    setReviewMode(mode);
+    if (reviewFrames.length === 0) return;
+    try {
+      const refreshed = await Promise.all(
+        reviewFrames.map(async (frame) => ({
+          ...frame,
+          proposals: await fetchDetectionProposals(frame.sessionId, mode),
+        }))
+      );
+      setReviewFrames(refreshed);
+      setActiveProposalIndex(0);
+      setMessage(`Switched review mode to ${mode}.`);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Failed to switch review mode");
+    }
+  }
+
   const activeBox =
     activeProposal &&
     activeProposal.bbox_x !== null &&
@@ -877,6 +905,11 @@ export default function Home() {
             <p className="muted-text">Take photos from camera or select from library (max 3).</p>
 
             <div className="toolbar-wrap">
+              <label className="tiny-text">Review Mode</label>
+              <select value={reviewMode} onChange={(e) => void changeReviewMode(e.target.value as ReviewMode)}>
+                <option value="grouped">Grouped labels</option>
+                <option value="boxes">Per-box review</option>
+              </select>
               <button onClick={() => void openCamera()}>Take Photo</button>
               <button onClick={() => libraryInputRef.current?.click()}>Upload From Device</button>
               <input

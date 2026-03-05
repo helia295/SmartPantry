@@ -5,6 +5,7 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from app.core.config import get_settings
 
@@ -136,6 +137,177 @@ def run_yolo_detection(image_bytes: bytes, confidence_threshold: float, model_na
             }
         )
     return proposals
+
+
+def aggregate_auto_proposals(proposals: list[Any]) -> list[dict]:
+    """
+    Aggregate auto-detected proposals by normalized label to reduce duplicates,
+    while leaving manual proposals as independent entries.
+    """
+    grouped: dict[str, dict] = {}
+    passthrough: list[dict] = []
+
+    for proposal in proposals:
+        source = getattr(proposal, "source", None) if not isinstance(proposal, dict) else proposal.get("source")
+        state = getattr(proposal, "state", None) if not isinstance(proposal, dict) else proposal.get("state")
+        if source != "auto" or state == "rejected":
+            passthrough.append(_proposal_to_dict(proposal))
+            continue
+
+        label_key = (
+            getattr(proposal, "label_normalized", "") if not isinstance(proposal, dict) else proposal.get("label_normalized", "")
+        ).strip()
+        if not label_key:
+            passthrough.append(_proposal_to_dict(proposal))
+            continue
+
+        current = _proposal_to_dict(proposal)
+        bucket = grouped.get(label_key)
+        if bucket is None:
+            bucket = current
+            bucket["quantity_suggested"] = float(bucket.get("quantity_suggested") or 1.0)
+            grouped[label_key] = bucket
+            continue
+
+        bucket["quantity_suggested"] = float(bucket.get("quantity_suggested") or 0.0) + float(
+            current.get("quantity_suggested") or 1.0
+        )
+        bucket["confidence"] = max(float(bucket.get("confidence") or 0.0), float(current.get("confidence") or 0.0))
+
+        # Expand bbox to include all same-label detections.
+        b1x = float(bucket.get("bbox_x") or 0.0)
+        b1y = float(bucket.get("bbox_y") or 0.0)
+        b1w = float(bucket.get("bbox_w") or 0.0)
+        b1h = float(bucket.get("bbox_h") or 0.0)
+        b2x = float(current.get("bbox_x") or 0.0)
+        b2y = float(current.get("bbox_y") or 0.0)
+        b2w = float(current.get("bbox_w") or 0.0)
+        b2h = float(current.get("bbox_h") or 0.0)
+        min_x = min(b1x, b2x)
+        min_y = min(b1y, b2y)
+        max_x = max(b1x + b1w, b2x + b2w)
+        max_y = max(b1y + b1h, b2y + b2h)
+        bucket["bbox_x"] = max(0.0, min(1.0, min_x))
+        bucket["bbox_y"] = max(0.0, min(1.0, min_y))
+        bucket["bbox_w"] = max(0.0, min(1.0, max_x - min_x))
+        bucket["bbox_h"] = max(0.0, min(1.0, max_y - min_y))
+
+    merged = list(grouped.values()) + passthrough
+    merged.sort(key=lambda p: (p.get("id", 0), p.get("label_normalized", "")))
+    return merged
+
+
+def detect_manual_region(
+    image_bytes: bytes,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    label_hint: str | None = None,
+) -> dict:
+    """
+    Try YOLO on a user-clicked crop region; fallback to hint-based/manual classification.
+    """
+    settings = get_settings()
+
+    box_w = max(0.05, min(1.0, w))
+    box_h = max(0.05, min(1.0, h))
+    box_x = max(0.0, min(1.0, x - box_w / 2))
+    box_y = max(0.0, min(1.0, y - box_h / 2))
+    box_w = min(1.0 - box_x, box_w)
+    box_h = min(1.0 - box_y, box_h)
+
+    if settings.detection_provider.strip().lower() == "yolo":
+        try:
+            yolo_result = _detect_on_crop_with_yolo(
+                image_bytes=image_bytes,
+                crop_x=box_x,
+                crop_y=box_y,
+                crop_w=box_w,
+                crop_h=box_h,
+                confidence_threshold=settings.detection_confidence_threshold,
+                model_name=settings.yolo_model_name,
+            )
+            if yolo_result is not None:
+                yolo_result["source"] = "manual"
+                yolo_result["state"] = "pending"
+                return yolo_result
+        except Exception:
+            logger.exception("Manual crop YOLO inference failed; using fallback classification")
+
+    fallback = classify_label_hint(label_hint or "manual item")
+    fallback["bbox_x"] = box_x
+    fallback["bbox_y"] = box_y
+    fallback["bbox_w"] = box_w
+    fallback["bbox_h"] = box_h
+    return fallback
+
+
+def _detect_on_crop_with_yolo(
+    image_bytes: bytes,
+    crop_x: float,
+    crop_y: float,
+    crop_w: float,
+    crop_h: float,
+    confidence_threshold: float,
+    model_name: str,
+) -> dict | None:
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    width, height = image.size
+    if width <= 0 or height <= 0:
+        return None
+
+    left = int(max(0, min(width - 1, round(crop_x * width))))
+    top = int(max(0, min(height - 1, round(crop_y * height))))
+    right = int(max(left + 1, min(width, round((crop_x + crop_w) * width))))
+    bottom = int(max(top + 1, min(height, round((crop_y + crop_h) * height))))
+    cropped = image.crop((left, top, right, bottom))
+
+    buffer = io.BytesIO()
+    cropped.save(buffer, format="JPEG")
+    crop_bytes = buffer.getvalue()
+    candidates = run_yolo_detection(
+        image_bytes=crop_bytes,
+        confidence_threshold=confidence_threshold,
+        model_name=model_name,
+    )
+    if not candidates:
+        return None
+
+    best = max(candidates, key=lambda p: float(p.get("confidence") or 0.0))
+    best_x = crop_x + float(best.get("bbox_x") or 0.0) * crop_w
+    best_y = crop_y + float(best.get("bbox_y") or 0.0) * crop_h
+    best_w = float(best.get("bbox_w") or 0.0) * crop_w
+    best_h = float(best.get("bbox_h") or 0.0) * crop_h
+    best["bbox_x"] = max(0.0, min(1.0, best_x))
+    best["bbox_y"] = max(0.0, min(1.0, best_y))
+    best["bbox_w"] = max(0.0, min(1.0, best_w))
+    best["bbox_h"] = max(0.0, min(1.0, best_h))
+    return best
+
+
+def _proposal_to_dict(proposal: Any) -> dict:
+    if isinstance(proposal, dict):
+        return dict(proposal)
+    return {
+        "id": proposal.id,
+        "session_id": proposal.session_id,
+        "label_raw": proposal.label_raw,
+        "label_normalized": proposal.label_normalized,
+        "confidence": proposal.confidence,
+        "quantity_suggested": proposal.quantity_suggested,
+        "quantity_unit": proposal.quantity_unit,
+        "category_suggested": proposal.category_suggested,
+        "is_perishable_suggested": proposal.is_perishable_suggested,
+        "bbox_x": proposal.bbox_x,
+        "bbox_y": proposal.bbox_y,
+        "bbox_w": proposal.bbox_w,
+        "bbox_h": proposal.bbox_h,
+        "source": proposal.source,
+        "state": proposal.state,
+    }
 
 
 def classify_label_hint(label_hint: str) -> dict:

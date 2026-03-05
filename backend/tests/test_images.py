@@ -165,6 +165,68 @@ async def test_get_detection_session_returns_proposals(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_detection_view_grouped_aggregates_same_label(client: AsyncClient, monkeypatch):
+    def fake_run_detection(image_bytes: bytes, original_filename: str):
+        return (
+            [
+                {
+                    "label_raw": "orange",
+                    "label_normalized": "orange",
+                    "confidence": 0.7,
+                    "quantity_suggested": 1.0,
+                    "quantity_unit": "count",
+                    "category_suggested": "Produce",
+                    "is_perishable_suggested": True,
+                    "bbox_x": 0.1,
+                    "bbox_y": 0.1,
+                    "bbox_w": 0.2,
+                    "bbox_h": 0.2,
+                    "source": "auto",
+                    "state": "pending",
+                },
+                {
+                    "label_raw": "orange",
+                    "label_normalized": "orange",
+                    "confidence": 0.6,
+                    "quantity_suggested": 1.0,
+                    "quantity_unit": "count",
+                    "category_suggested": "Produce",
+                    "is_perishable_suggested": True,
+                    "bbox_x": 0.45,
+                    "bbox_y": 0.45,
+                    "bbox_w": 0.2,
+                    "bbox_h": 0.2,
+                    "source": "auto",
+                    "state": "pending",
+                },
+            ],
+            "yolo-test",
+        )
+
+    monkeypatch.setattr("app.api.images.run_detection", fake_run_detection)
+
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    files = [("files", ("fruit.jpg", b"abc123", "image/jpeg"))]
+
+    upload_res = await client.post("/images", headers=headers, files=files)
+    assert upload_res.status_code == 201
+    session_id = upload_res.json()["results"][0]["detection_session"]["id"]
+
+    grouped_res = await client.get(f"/detections/{session_id}?view=grouped", headers=headers)
+    assert grouped_res.status_code == 200
+    grouped = grouped_res.json()["proposals"]
+    assert len(grouped) == 1
+    assert grouped[0]["label_normalized"] == "orange"
+    assert grouped[0]["quantity_suggested"] == 2.0
+
+    boxes_res = await client.get(f"/detections/{session_id}?view=boxes", headers=headers)
+    assert boxes_res.status_code == 200
+    boxes = boxes_res.json()["proposals"]
+    assert len(boxes) == 2
+
+
+@pytest.mark.asyncio
 async def test_get_image_content_returns_bytes(client: AsyncClient):
     token = await register_and_login(client)
     headers = {"Authorization": f"Bearer {token}"}

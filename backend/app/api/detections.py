@@ -1,16 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.db import get_db
-from app.models import DetectionProposal, DetectionSession, User
+from app.models import DetectionProposal, DetectionSession, Image, User
 from app.schemas import (
     DetectionProposalRead,
     DetectionProposalUpdate,
     DetectionSessionDetailResponse,
     ManualProposalCreate,
 )
-from app.services.detection import classify_label_hint
+from app.services.detection import aggregate_auto_proposals, detect_manual_region
+from app.services.storage import get_storage_service
 
 
 router = APIRouter()
@@ -19,6 +20,7 @@ router = APIRouter()
 @router.get("/{session_id}", response_model=DetectionSessionDetailResponse)
 def get_detection_session(
     session_id: int,
+    view: str = Query("grouped", pattern="^(grouped|boxes)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> DetectionSessionDetailResponse:
@@ -36,6 +38,8 @@ def get_detection_session(
         .order_by(DetectionProposal.id.asc())
         .all()
     )
+    if view == "grouped":
+        proposals = aggregate_auto_proposals(proposals)
     return DetectionSessionDetailResponse(session=session, proposals=proposals)
 
 
@@ -57,13 +61,30 @@ def create_manual_proposal(
     if payload.x < 0 or payload.x > 1 or payload.y < 0 or payload.y > 1:
         raise HTTPException(status_code=400, detail="x and y must be normalized between 0 and 1")
 
-    base = classify_label_hint(payload.label_hint or "manual item")
+    image = (
+        db.query(Image)
+        .filter(Image.id == session.image_id, Image.user_id == current_user.id, Image.deleted_at.is_(None))
+        .first()
+    )
+    if image is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    storage = get_storage_service()
+    try:
+        image_bytes = storage.read_bytes(image.storage_key)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image object not found")
+
+    base = detect_manual_region(
+        image_bytes=image_bytes,
+        x=payload.x,
+        y=payload.y,
+        w=payload.w,
+        h=payload.h,
+        label_hint=payload.label_hint,
+    )
     proposal = DetectionProposal(
         session_id=session.id,
-        bbox_x=max(0.0, min(1.0, payload.x - payload.w / 2)),
-        bbox_y=max(0.0, min(1.0, payload.y - payload.h / 2)),
-        bbox_w=max(0.05, min(1.0, payload.w)),
-        bbox_h=max(0.05, min(1.0, payload.h)),
         **base,
     )
     db.add(proposal)
