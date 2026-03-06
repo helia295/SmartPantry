@@ -12,10 +12,12 @@ from app.schemas.image import (
     DetectionProposalRead,
     DetectionSessionDetailResponse,
     DetectionSessionRead,
+    DetectionProposalUpdate,
     ImageListResponse,
     ImageRead,
     ImageUploadResult,
     ImageUploadResponse,
+    ManualProposalCreate,
 )
 
 __all__ = [
@@ -30,10 +32,12 @@ __all__ = [
     "InventoryItemRead",
     "InventoryItemUpdate",
     "DetectionProposalRead",
+    "DetectionProposalUpdate",
     "DetectionSessionDetailResponse",
     "DetectionSessionRead",
     "ImageListResponse",
     "ImageRead",
     "ImageUploadResult",
     "ImageUploadResponse",
+    "ManualProposalCreate",
 ]

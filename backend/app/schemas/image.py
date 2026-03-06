@@ -26,6 +26,13 @@ class DetectionProposalRead(BaseModel):
     confidence: Optional[float] = None
     quantity_suggested: Optional[float] = None
     quantity_unit: Optional[str] = None
+    category_suggested: Optional[str] = None
+    is_perishable_suggested: Optional[bool] = None
+    bbox_x: Optional[float] = None
+    bbox_y: Optional[float] = None
+    bbox_w: Optional[float] = None
+    bbox_h: Optional[float] = None
+    source: str
     state: str
 
     class Config:
@@ -63,3 +70,20 @@ class ImageListResponse(BaseModel):
 class DetectionSessionDetailResponse(BaseModel):
     session: DetectionSessionRead
     proposals: list[DetectionProposalRead]
+
+
+class ManualProposalCreate(BaseModel):
+    x: float
+    y: float
+    w: float = 0.22
+    h: float = 0.22
+    label_hint: Optional[str] = None
+
+
+class DetectionProposalUpdate(BaseModel):
+    label_raw: Optional[str] = None
+    quantity_suggested: Optional[float] = None
+    quantity_unit: Optional[str] = None
+    category_suggested: Optional[str] = None
+    is_perishable_suggested: Optional[bool] = None
+    state: Optional[str] = None

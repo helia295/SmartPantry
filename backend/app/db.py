@@ -68,3 +68,28 @@ def ensure_sqlite_schema_compatibility() -> None:
                 conn.exec_driver_sql(
                     "ALTER TABLE users ADD COLUMN timezone VARCHAR(64) NOT NULL DEFAULT 'UTC'"
                 )
+
+        proposals_table = conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='detection_proposals'"
+        ).first()
+        if proposals_table is not None:
+            proposal_columns = {
+                row[1]
+                for row in conn.exec_driver_sql("PRAGMA table_info(detection_proposals)").fetchall()
+            }
+            if "bbox_x" not in proposal_columns:
+                conn.exec_driver_sql("ALTER TABLE detection_proposals ADD COLUMN bbox_x FLOAT")
+            if "bbox_y" not in proposal_columns:
+                conn.exec_driver_sql("ALTER TABLE detection_proposals ADD COLUMN bbox_y FLOAT")
+            if "bbox_w" not in proposal_columns:
+                conn.exec_driver_sql("ALTER TABLE detection_proposals ADD COLUMN bbox_w FLOAT")
+            if "bbox_h" not in proposal_columns:
+                conn.exec_driver_sql("ALTER TABLE detection_proposals ADD COLUMN bbox_h FLOAT")
+            if "category_suggested" not in proposal_columns:
+                conn.exec_driver_sql("ALTER TABLE detection_proposals ADD COLUMN category_suggested VARCHAR(64)")
+            if "is_perishable_suggested" not in proposal_columns:
+                conn.exec_driver_sql("ALTER TABLE detection_proposals ADD COLUMN is_perishable_suggested BOOLEAN")
+            if "source" not in proposal_columns:
+                conn.exec_driver_sql(
+                    "ALTER TABLE detection_proposals ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'auto'"
+                )

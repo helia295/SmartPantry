@@ -1,5 +1,12 @@
 import os
 from functools import lru_cache
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+BACKEND_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(BACKEND_ENV_PATH)
 
 
 class Settings:
@@ -34,6 +41,14 @@ class Settings:
     max_upload_images: int = int(os.getenv("MAX_UPLOAD_IMAGES", "3"))
     max_image_size_mb: int = int(os.getenv("MAX_IMAGE_SIZE_MB", "5"))
     image_retention_days: int = int(os.getenv("IMAGE_RETENTION_DAYS", "7"))
+
+    # Detection provider configuration.
+    # Keep mock as default so local dev and CI remain lightweight.
+    detection_provider: str = os.getenv("DETECTION_PROVIDER", "mock")
+    yolo_model_name: str = os.getenv("YOLO_MODEL_NAME", "yolov8n.pt")
+    detection_confidence_threshold: float = float(
+        os.getenv("DETECTION_CONFIDENCE_THRESHOLD", "0.35")
+    )
 
     # Local storage path for development fallback.
     local_storage_dir: str = os.getenv("LOCAL_STORAGE_DIR", "./storage")

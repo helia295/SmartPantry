@@ -13,6 +13,7 @@ dependencies = [
     "email-validator>=2.0.0",
     "python-multipart>=0.0.9",
     "boto3>=1.34.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +21,9 @@ dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.23.0",
     "httpx>=0.26.0",
+]
+ml = [
+    "ultralytics>=8.2.0",
 ]
 
 [build-system]

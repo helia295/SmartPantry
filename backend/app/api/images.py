@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -16,7 +16,7 @@ from app.schemas import (
     ImageUploadResponse,
     ImageUploadResult,
 )
-from app.services.detection import run_mock_detection
+from app.services.detection import run_detection
 from app.services.storage import get_storage_service
 
 
@@ -47,6 +47,33 @@ def list_images(
         .all()
     )
     return ImageListResponse(results=rows)
+
+
+@router.get("/{image_id}/content")
+def get_image_content(
+    image_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    image = (
+        db.query(Image)
+        .filter(
+            Image.id == image_id,
+            Image.user_id == current_user.id,
+            Image.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if image is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    storage = get_storage_service()
+    try:
+        content = storage.read_bytes(image.storage_key)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image object not found")
+
+    return Response(content=content, media_type=image.content_type)
 
 
 @router.post("", response_model=ImageUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -108,16 +135,18 @@ async def upload_images(
                 user_id=current_user.id,
                 image_id=image.id,
                 status="pending",
-                model_version="mock-v0",
+                model_version=None,
             )
             db.add(session)
             db.flush()
 
-            # Placeholder detection for Milestone 4 scaffolding.
-            mock = run_mock_detection(image.original_filename)
-            proposal = DetectionProposal(session_id=session.id, **mock)
-            db.add(proposal)
+            proposals, model_version = run_detection(
+                image_bytes=content, original_filename=image.original_filename
+            )
+            for proposal_payload in proposals:
+                db.add(DetectionProposal(session_id=session.id, **proposal_payload))
 
+            session.model_version = model_version
             session.status = "completed"
             session.completed_at = datetime.now(timezone.utc)
             db.add(session)

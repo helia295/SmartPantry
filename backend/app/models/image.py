@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -61,4 +61,11 @@ class DetectionProposal(Base):
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     quantity_suggested: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     quantity_unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    category_suggested: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    is_perishable_suggested: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    bbox_x: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bbox_y: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bbox_w: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bbox_h: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="auto")
     state: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
