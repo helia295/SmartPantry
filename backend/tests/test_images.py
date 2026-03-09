@@ -6,8 +6,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.config import get_settings
-from app.db import Base, engine, ensure_sqlite_schema_compatibility
+from app.db import Base, SessionLocal, engine, ensure_sqlite_schema_compatibility
 from app.main import app
+from app.models import InventoryChangeLog
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -298,3 +299,153 @@ async def test_update_detection_proposal(client: AsyncClient):
     assert updated["category_suggested"] == "Pantry"
     assert updated["is_perishable_suggested"] is False
     assert updated["state"] == "edited"
+
+
+@pytest.mark.asyncio
+async def test_confirm_add_new_creates_inventory_and_change_log(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    files = [("files", ("orange.jpg", b"abc123", "image/jpeg"))]
+
+    upload_res = await client.post("/images", headers=headers, files=files)
+    assert upload_res.status_code == 201
+    session_id = upload_res.json()["results"][0]["detection_session"]["id"]
+
+    session_res = await client.get(f"/detections/{session_id}?view=boxes", headers=headers)
+    proposal_id = session_res.json()["proposals"][0]["id"]
+
+    confirm_res = await client.post(
+        f"/detections/{session_id}/confirm",
+        headers=headers,
+        json={
+            "actions": [
+                {
+                    "proposal_id": proposal_id,
+                    "action": "add_new",
+                    "name": "Orange",
+                    "quantity": 2,
+                    "unit": "count",
+                    "category": "Produce",
+                    "is_perishable": True,
+                }
+            ]
+        },
+    )
+    assert confirm_res.status_code == 200
+    summary = confirm_res.json()
+    assert summary["processed"] == 1
+    assert summary["added"] == 1
+    assert summary["logs_created"] == 1
+
+    inventory_res = await client.get("/inventory", headers=headers)
+    assert inventory_res.status_code == 200
+    items = inventory_res.json()
+    assert any(i["name"] == "Orange" and i["quantity"] == 2 for i in items)
+
+    with SessionLocal() as db:
+        log = (
+            db.query(InventoryChangeLog)
+            .filter(
+                InventoryChangeLog.session_id == session_id,
+                InventoryChangeLog.proposal_id == proposal_id,
+                InventoryChangeLog.change_type == "add",
+            )
+            .first()
+        )
+        assert log is not None
+
+
+@pytest.mark.asyncio
+async def test_confirm_update_existing_adds_quantity_and_log(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    create_res = await client.post(
+        "/inventory",
+        headers=headers,
+        json={"name": "Milk", "quantity": 1, "unit": "carton", "category": "Dairy & Eggs"},
+    )
+    assert create_res.status_code == 201
+    item_id = create_res.json()["id"]
+
+    files = [("files", ("milk_carton.jpg", b"abc123", "image/jpeg"))]
+    upload_res = await client.post("/images", headers=headers, files=files)
+    assert upload_res.status_code == 201
+    session_id = upload_res.json()["results"][0]["detection_session"]["id"]
+
+    session_res = await client.get(f"/detections/{session_id}?view=boxes", headers=headers)
+    proposal_id = session_res.json()["proposals"][0]["id"]
+
+    confirm_res = await client.post(
+        f"/detections/{session_id}/confirm",
+        headers=headers,
+        json={
+            "actions": [
+                {
+                    "proposal_id": proposal_id,
+                    "action": "update_existing",
+                    "target_item_id": item_id,
+                    "name": "Milk",
+                    "quantity": 2,
+                    "unit": "carton",
+                    "category": "Dairy & Eggs",
+                    "is_perishable": True,
+                }
+            ]
+        },
+    )
+    assert confirm_res.status_code == 200
+    summary = confirm_res.json()
+    assert summary["updated"] == 1
+
+    inventory_res = await client.get("/inventory", headers=headers)
+    items = inventory_res.json()
+    milk = next(item for item in items if item["id"] == item_id)
+    assert milk["quantity"] == 3
+
+    with SessionLocal() as db:
+        log = (
+            db.query(InventoryChangeLog)
+            .filter(
+                InventoryChangeLog.session_id == session_id,
+                InventoryChangeLog.proposal_id == proposal_id,
+                InventoryChangeLog.change_type == "update",
+            )
+            .first()
+        )
+        assert log is not None
+
+
+@pytest.mark.asyncio
+async def test_confirm_reject_creates_reject_log(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    files = [("files", ("shelf.jpg", b"abc123", "image/jpeg"))]
+
+    upload_res = await client.post("/images", headers=headers, files=files)
+    assert upload_res.status_code == 201
+    session_id = upload_res.json()["results"][0]["detection_session"]["id"]
+
+    session_res = await client.get(f"/detections/{session_id}?view=boxes", headers=headers)
+    proposal_id = session_res.json()["proposals"][0]["id"]
+
+    confirm_res = await client.post(
+        f"/detections/{session_id}/confirm",
+        headers=headers,
+        json={"actions": [{"proposal_id": proposal_id, "action": "reject"}]},
+    )
+    assert confirm_res.status_code == 200
+    summary = confirm_res.json()
+    assert summary["rejected"] == 1
+
+    with SessionLocal() as db:
+        log = (
+            db.query(InventoryChangeLog)
+            .filter(
+                InventoryChangeLog.session_id == session_id,
+                InventoryChangeLog.proposal_id == proposal_id,
+                InventoryChangeLog.change_type == "reject",
+            )
+            .first()
+        )
+        assert log is not None

@@ -1,5 +1,12 @@
 from app.models.user import User
-from app.models.inventory import InventoryItem
+from app.models.inventory import InventoryChangeLog, InventoryItem
 from app.models.image import DetectionProposal, DetectionSession, Image
 
-__all__ = ["User", "InventoryItem", "Image", "DetectionSession", "DetectionProposal"]
+__all__ = [
+    "User",
+    "InventoryItem",
+    "InventoryChangeLog",
+    "Image",
+    "DetectionSession",
+    "DetectionProposal",
+]
