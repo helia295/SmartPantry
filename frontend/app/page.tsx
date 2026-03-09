@@ -648,59 +648,41 @@ export default function Home() {
     setMessage("Review complete for all uploaded images.");
   }
 
-  async function persistActiveProposal(stateOverride?: string): Promise<boolean> {
+  async function confirmActiveProposal(
+    action: "add_new" | "update_existing" | "reject",
+    targetItemId?: number
+  ): Promise<boolean> {
     if (!activeFrame || !activeProposal) return false;
-    const res = await fetch(
-      `${API_BASE}/detections/${activeFrame.sessionId}/proposals/${activeProposal.id}`,
-      {
-        method: "PATCH",
-        headers: authHeaders("application/json"),
-        body: JSON.stringify({
-          label_raw: activeProposal.label_raw,
-          quantity_suggested: activeProposal.quantity_suggested ?? 1,
-          quantity_unit: activeProposal.quantity_unit || "count",
-          category_suggested: activeProposal.category_suggested || "Other",
-          is_perishable_suggested: Boolean(activeProposal.is_perishable_suggested),
-          state: stateOverride || activeProposal.state || "pending",
-        }),
-      }
-    );
+    const res = await fetch(`${API_BASE}/detections/${activeFrame.sessionId}/confirm`, {
+      method: "POST",
+      headers: authHeaders("application/json"),
+      body: JSON.stringify({
+        actions: [
+          {
+            proposal_id: activeProposal.id,
+            action,
+            target_item_id: targetItemId,
+            name: activeProposal.label_raw,
+            quantity: activeProposal.quantity_suggested ?? 1,
+            unit: activeProposal.quantity_unit || "count",
+            category: activeProposal.category_suggested || "Other",
+            is_perishable: Boolean(activeProposal.is_perishable_suggested),
+          },
+        ],
+      }),
+    });
     if (!res.ok) {
       setMessage(await parseError(res));
       return false;
     }
-
-    const saved = (await res.json()) as DetectionProposal;
-    updateActiveProposal(saved);
+    updateActiveProposal({ state: action === "reject" ? "rejected" : "accepted" });
     return true;
   }
 
   async function addProposalToInventory() {
     if (!activeProposal) return;
-    const name = activeProposal.label_raw;
-    const quantity = activeProposal.quantity_suggested || 1;
-    const unit = activeProposal.quantity_unit || "count";
-    const category = activeProposal.category_suggested || "Other";
-    const isPerishable = Boolean(activeProposal.is_perishable_suggested);
-
-    const persisted = await persistActiveProposal("accepted");
+    const persisted = await confirmActiveProposal("add_new");
     if (!persisted) return;
-
-    const res = await fetch(`${API_BASE}/inventory`, {
-      method: "POST",
-      headers: authHeaders("application/json"),
-      body: JSON.stringify({
-        name,
-        quantity,
-        unit,
-        category,
-        is_perishable: isPerishable,
-      }),
-    });
-    if (!res.ok) {
-      setMessage(await parseError(res));
-      return;
-    }
 
     await loadInventory();
     moveToNextProposal();
@@ -711,22 +693,8 @@ export default function Home() {
       setMessage("No matching inventory item found for update.");
       return;
     }
-    const persisted = await persistActiveProposal("accepted");
+    const persisted = await confirmActiveProposal("update_existing", activeInventoryMatch.id);
     if (!persisted) return;
-
-    const mergedQuantity = activeInventoryMatch.quantity + (activeProposal.quantity_suggested || 1);
-    const res = await fetch(`${API_BASE}/inventory/${activeInventoryMatch.id}`, {
-      method: "PATCH",
-      headers: authHeaders("application/json"),
-      body: JSON.stringify({
-        quantity: mergedQuantity,
-        category: activeInventoryMatch.category || activeProposal.category_suggested || "Other",
-      }),
-    });
-    if (!res.ok) {
-      setMessage(await parseError(res));
-      return;
-    }
 
     await loadInventory();
     moveToNextProposal();
@@ -1043,7 +1011,7 @@ export default function Home() {
                         </button>
                         <button
                           onClick={() => void (async () => {
-                            const persisted = await persistActiveProposal("rejected");
+                            const persisted = await confirmActiveProposal("reject");
                             if (!persisted) return;
                             updateActiveProposal({ state: "rejected" });
                             moveToNextProposal();

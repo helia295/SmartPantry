@@ -9,6 +9,9 @@ from app.schemas.user import (
 )
 from app.schemas.inventory import InventoryItemCreate, InventoryItemRead, InventoryItemUpdate
 from app.schemas.image import (
+    DetectionConfirmAction,
+    DetectionConfirmRequest,
+    DetectionConfirmResult,
     DetectionProposalRead,
     DetectionSessionDetailResponse,
     DetectionSessionRead,
@@ -33,6 +36,9 @@ __all__ = [
     "InventoryItemUpdate",
     "DetectionProposalRead",
     "DetectionProposalUpdate",
+    "DetectionConfirmAction",
+    "DetectionConfirmRequest",
+    "DetectionConfirmResult",
     "DetectionSessionDetailResponse",
     "DetectionSessionRead",
     "ImageListResponse",

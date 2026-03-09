@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -87,3 +87,26 @@ class DetectionProposalUpdate(BaseModel):
     category_suggested: Optional[str] = None
     is_perishable_suggested: Optional[bool] = None
     state: Optional[str] = None
+
+
+class DetectionConfirmAction(BaseModel):
+    proposal_id: int
+    action: Literal["add_new", "update_existing", "reject"]
+    target_item_id: Optional[int] = None
+    name: Optional[str] = None
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    category: Optional[str] = None
+    is_perishable: Optional[bool] = None
+
+
+class DetectionConfirmRequest(BaseModel):
+    actions: list[DetectionConfirmAction]
+
+
+class DetectionConfirmResult(BaseModel):
+    processed: int
+    added: int
+    updated: int
+    rejected: int
+    logs_created: int
