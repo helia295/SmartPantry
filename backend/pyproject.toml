@@ -23,6 +23,8 @@ dev = [
     "httpx>=0.26.0",
 ]
 ml = [
+    "numpy<2",
+    "opencv-python<4.12",
     "ultralytics>=8.2.0",
 ]
 

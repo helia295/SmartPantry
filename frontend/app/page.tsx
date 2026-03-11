@@ -185,6 +185,7 @@ export default function Home() {
   const [reviewFrames, setReviewFrames] = useState<ReviewFrame[]>([]);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [activeProposalIndex, setActiveProposalIndex] = useState(0);
+  const [activeProposalQuantityInput, setActiveProposalQuantityInput] = useState("1");
   const [reviewMode, setReviewMode] = useState<ReviewMode>("grouped");
   const [manualPointMode, setManualPointMode] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -242,6 +243,10 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    setActiveProposalQuantityInput(String(activeProposal?.quantity_suggested ?? 1));
+  }, [activeProposal?.id, activeProposal?.quantity_suggested]);
+
   const timezoneSelectOptions = useMemo(() => {
     const set = new Set<string>(timezoneOptions);
     set.add("UTC");
@@ -265,25 +270,14 @@ export default function Home() {
     return headers;
   }
 
-  async function register() {
-    setMessage("");
-    const res = await fetch(`${API_BASE}/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) {
-      setMessage(await parseError(res));
-      return;
-    }
-    setMessage("Registered successfully. Log in next.");
-  }
-
-  async function login() {
-    setMessage("");
+  async function loginWithCredentials(
+    emailValue: string,
+    passwordValue: string,
+    successMessage = "Logged in."
+  ): Promise<boolean> {
     const body = new URLSearchParams();
-    body.set("username", email);
-    body.set("password", password);
+    body.set("username", emailValue);
+    body.set("password", passwordValue);
 
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
@@ -292,12 +286,42 @@ export default function Home() {
     });
     if (!res.ok) {
       setMessage(await parseError(res));
-      return;
+      return false;
     }
     const data = await res.json();
     localStorage.setItem("smartpantry_token", data.access_token);
     setToken(data.access_token);
-    setMessage("Logged in.");
+    setMessage(successMessage);
+    return true;
+  }
+
+  async function register() {
+    setMessage("");
+    const emailValue = email.trim();
+    const passwordValue = password;
+    const res = await fetch(`${API_BASE}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: emailValue, password: passwordValue }),
+    });
+    if (!res.ok) {
+      setMessage(await parseError(res));
+      return;
+    }
+
+    const loggedIn = await loginWithCredentials(
+      emailValue,
+      passwordValue,
+      "Registered successfully and logged in."
+    );
+    if (!loggedIn) {
+      setMessage("Registered successfully, but automatic login failed. Please log in manually.");
+    }
+  }
+
+  async function login() {
+    setMessage("");
+    await loginWithCredentials(email.trim(), password);
   }
 
   async function loadCurrentUser() {
@@ -632,6 +656,25 @@ export default function Home() {
     );
   }
 
+  function handleActiveProposalQuantityChange(rawValue: string) {
+    setActiveProposalQuantityInput(rawValue);
+    if (rawValue.trim() === "") return;
+
+    const parsedValue = Number(rawValue);
+    if (Number.isNaN(parsedValue)) return;
+
+    updateActiveProposal({ quantity_suggested: parsedValue });
+  }
+
+  function commitActiveProposalQuantity() {
+    const parsedValue = Number(activeProposalQuantityInput);
+    const nextValue =
+      activeProposalQuantityInput.trim() === "" || Number.isNaN(parsedValue) ? 1 : parsedValue;
+
+    setActiveProposalQuantityInput(String(nextValue));
+    updateActiveProposal({ quantity_suggested: nextValue });
+  }
+
   function moveToNextProposal() {
     if (!activeFrame) return;
     if (activeProposalIndex + 1 < activeFrame.proposals.length) {
@@ -950,11 +993,11 @@ export default function Home() {
                       <label>Suggested quantity</label>
                       <input
                         type="number"
-                        step="0.1"
-                        value={activeProposal.quantity_suggested || 1}
-                        onChange={(e) =>
-                          updateActiveProposal({ quantity_suggested: Number(e.target.value || "1") })
-                        }
+                        inputMode="decimal"
+                        step="1"
+                        value={activeProposalQuantityInput}
+                        onChange={(e) => handleActiveProposalQuantityChange(e.target.value)}
+                        onBlur={commitActiveProposalQuantity}
                       />
 
                       <label>Unit</label>

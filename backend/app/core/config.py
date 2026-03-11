@@ -43,8 +43,9 @@ class Settings:
     image_retention_days: int = int(os.getenv("IMAGE_RETENTION_DAYS", "7"))
 
     # Detection provider configuration.
-    # Keep mock as default so local dev and CI remain lightweight.
-    detection_provider: str = os.getenv("DETECTION_PROVIDER", "mock")
+    # Prefer YOLO for local demos and only fall back to mock at runtime if
+    # model inference or its dependencies are unavailable.
+    detection_provider: str = os.getenv("DETECTION_PROVIDER", "yolo")
     yolo_model_name: str = os.getenv("YOLO_MODEL_NAME", "yolov8n.pt")
     detection_confidence_threshold: float = float(
         os.getenv("DETECTION_CONFIDENCE_THRESHOLD", "0.35")
