@@ -22,6 +22,13 @@ from app.schemas.image import (
     ImageUploadResponse,
     ManualProposalCreate,
 )
+from app.schemas.recipe import (
+    RecipeDetailRead,
+    RecipeIngredientRead,
+    RecipeRecommendationListResponse,
+    RecipeRecommendationRead,
+    RecipeSummaryRead,
+)
 
 __all__ = [
     "UserBase",
@@ -46,4 +53,9 @@ __all__ = [
     "ImageUploadResult",
     "ImageUploadResponse",
     "ManualProposalCreate",
+    "RecipeIngredientRead",
+    "RecipeSummaryRead",
+    "RecipeDetailRead",
+    "RecipeRecommendationRead",
+    "RecipeRecommendationListResponse",
 ]

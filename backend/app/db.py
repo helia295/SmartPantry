@@ -1,6 +1,7 @@
 from typing import Generator
 
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.core.config import get_settings
@@ -16,9 +17,11 @@ class Base(DeclarativeBase):
 # For SQLite we need check_same_thread=False for use with FastAPI.
 engine = create_engine(
     settings.database_url,
-    connect_args={"check_same_thread": False}
-    if settings.database_url.startswith("sqlite")
-    else {},
+    connect_args=(
+        {"check_same_thread": False, "timeout": 30}
+        if settings.database_url.startswith("sqlite")
+        else {}
+    ),
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -93,3 +96,17 @@ def ensure_sqlite_schema_compatibility() -> None:
                 conn.exec_driver_sql(
                     "ALTER TABLE detection_proposals ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'auto'"
                 )
+
+        recipes_table = conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='recipes'"
+        ).first()
+        if recipes_table is not None:
+            recipe_columns = {
+                row[1] for row in conn.exec_driver_sql("PRAGMA table_info(recipes)").fetchall()
+            }
+            if "rating" not in recipe_columns:
+                try:
+                    conn.exec_driver_sql("ALTER TABLE recipes ADD COLUMN rating FLOAT")
+                except OperationalError as exc:
+                    if "duplicate column name: rating" not in str(exc).lower():
+                        raise

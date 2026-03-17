@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ChangeEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE =
@@ -24,6 +25,31 @@ type InventoryItem = {
 };
 
 type Option = { value: string; label: string };
+type RecipeSummary = {
+  id: number;
+  title: string;
+  slug: string;
+  source_name?: string | null;
+  source_url?: string | null;
+  image_url?: string | null;
+  rating?: number | null;
+  prep_minutes?: number | null;
+  cook_minutes?: number | null;
+  total_minutes?: number | null;
+  servings?: number | null;
+  cuisine?: string | null;
+  dietary_tags: string[];
+  nutrition: Record<string, string | number | boolean | null>;
+};
+
+type RecipeRecommendation = {
+  recipe: RecipeSummary;
+  score: number;
+  inventory_match_count: number;
+  required_ingredient_count: number;
+  matched_ingredients: string[];
+  missing_ingredients: string[];
+};
 
 type ImageRecord = {
   id: number;
@@ -162,6 +188,27 @@ function formatDate(isoValue?: string | null, timezone?: string): string {
   }
 }
 
+function buildAllrecipesSearchUrl(title: string): string {
+  return `https://www.allrecipes.com/search?q=${encodeURIComponent(title)}`;
+}
+
+function RecipeCardImage({ src, alt }: { src?: string | null; alt: string }) {
+  const [broken, setBroken] = useState(false);
+
+  if (!src || broken) {
+    return <div className="recipe-image recipe-image-fallback">Recipe image unavailable</div>;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="recipe-image"
+      onError={() => setBroken(true)}
+    />
+  );
+}
+
 export default function Home() {
   const [health, setHealth] = useState<Health>(null);
   const [error, setError] = useState<string | null>(null);
@@ -190,6 +237,13 @@ export default function Home() {
   const [manualPointMode, setManualPointMode] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [showRecipeFinder, setShowRecipeFinder] = useState(false);
+  const [recipeMainIngredients, setRecipeMainIngredients] = useState("");
+  const [recipeCuisine, setRecipeCuisine] = useState("");
+  const [recipeMaxTotalMinutes, setRecipeMaxTotalMinutes] = useState("");
+  const [recipeDietaryTags, setRecipeDietaryTags] = useState("");
+  const [recipeResults, setRecipeResults] = useState<RecipeRecommendation[]>([]);
+  const [recipesLoading, setRecipesLoading] = useState(false);
 
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const libraryInputRef = useRef<HTMLInputElement | null>(null);
@@ -796,6 +850,39 @@ export default function Home() {
     }
   }
 
+  async function findRecipes() {
+    if (!token) {
+      setMessage("Log in first.");
+      return;
+    }
+
+    const params = new URLSearchParams();
+    if (recipeMainIngredients.trim()) params.set("main_ingredients", recipeMainIngredients.trim());
+    if (recipeCuisine.trim()) params.set("cuisine", recipeCuisine.trim());
+    if (recipeDietaryTags.trim()) params.set("dietary_tags", recipeDietaryTags.trim());
+    if (recipeMaxTotalMinutes.trim()) params.set("max_total_minutes", recipeMaxTotalMinutes.trim());
+    params.set("limit", "8");
+
+    setRecipesLoading(true);
+    const res = await fetch(`${API_BASE}/recipes/recommendations?${params.toString()}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      setRecipesLoading(false);
+      setMessage(await parseError(res));
+      return;
+    }
+
+    const payload = (await res.json()) as { results: RecipeRecommendation[] };
+    setRecipeResults(payload.results);
+    setRecipesLoading(false);
+    setMessage(
+      payload.results.length > 0
+        ? `Loaded ${payload.results.length} recipe recommendations.`
+        : "No recipe matches found for the current inventory and filters."
+    );
+  }
+
   const activeBox =
     activeProposal &&
     activeProposal.bbox_x !== null &&
@@ -1073,6 +1160,99 @@ export default function Home() {
             )}
           </section>
         </div>
+
+        <section className="card">
+          <div className="hero-row">
+            <div>
+              <h2>Find Recipes</h2>
+              <p className="muted-text">
+                Match recipes against your confirmed inventory and optional preferences.
+              </p>
+            </div>
+            <button onClick={() => setShowRecipeFinder((prev) => !prev)}>
+              {showRecipeFinder ? "Hide Filters" : "Find Recipe"}
+            </button>
+          </div>
+
+          {showRecipeFinder && (
+            <div className="recipe-toolbar">
+              <input
+                value={recipeMainIngredients}
+                onChange={(e) => setRecipeMainIngredients(e.target.value)}
+                placeholder="Main ingredients (comma-separated)"
+              />
+              <input
+                value={recipeCuisine}
+                onChange={(e) => setRecipeCuisine(e.target.value)}
+                placeholder="Cuisine (optional)"
+              />
+              <input
+                value={recipeMaxTotalMinutes}
+                onChange={(e) => setRecipeMaxTotalMinutes(e.target.value)}
+                type="number"
+                min="1"
+                step="1"
+                placeholder="Max total minutes"
+              />
+              <input
+                value={recipeDietaryTags}
+                onChange={(e) => setRecipeDietaryTags(e.target.value)}
+                placeholder="Dietary tags (comma-separated)"
+              />
+              <button onClick={() => void findRecipes()} disabled={recipesLoading}>
+                {recipesLoading ? "Loading..." : "Get Recommendations"}
+              </button>
+            </div>
+          )}
+
+          {recipeResults.length > 0 && (
+            <div className="recipe-grid">
+              {recipeResults.map((result) => (
+                <article key={result.recipe.id} className="recipe-card">
+                  <RecipeCardImage src={result.recipe.image_url} alt={result.recipe.title} />
+
+                  <div className="recipe-meta">
+                    <div>
+                      <h3>{result.recipe.title}</h3>
+                      <p className="tiny-text">
+                        {result.recipe.source_name || "Unknown source"}
+                        {result.recipe.cuisine ? ` - ${result.recipe.cuisine}` : ""}
+                      </p>
+                    </div>
+                    {typeof result.recipe.rating === "number" && (
+                      <p className="tiny-text">Rating: {result.recipe.rating.toFixed(1)} / 5</p>
+                    )}
+                    <p className="tiny-text">
+                      Score {result.score.toFixed(2)} - Matched {result.inventory_match_count}/
+                      {result.required_ingredient_count}
+                    </p>
+                    <p className="tiny-text">
+                      Time: {result.recipe.total_minutes ?? "N/A"} min
+                      {result.recipe.prep_minutes ? ` | Prep ${result.recipe.prep_minutes}` : ""}
+                      {result.recipe.cook_minutes ? ` | Cook ${result.recipe.cook_minutes}` : ""}
+                    </p>
+                    <p className="tiny-text">
+                      Missing:{" "}
+                      {result.missing_ingredients.length > 0
+                        ? result.missing_ingredients.slice(0, 4).join(", ")
+                        : "None"}
+                    </p>
+                    <div className="row-gap">
+                      <Link href={`/recipes/${result.recipe.id}`}>View Details</Link>
+                      <a
+                        href={buildAllrecipesSearchUrl(result.recipe.title)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Search on Allrecipes
+                      </a>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
 
         <div className="card">
           <h3>System</h3>
