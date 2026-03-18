@@ -10,8 +10,8 @@ AI-powered kitchen inventory: upload pantry photos, review AI proposals, and get
 
 ## Tooling
 
-- Node.js: `20.20.1` via the repo-level [`.nvmrc`](/Users/heliadinh/Desktop/CS personal projects/SmartPantry/.nvmrc)
-- Python: `>=3.9` for the backend
+- Node.js: `20.20.1` via the repo-level `[.nvmrc](/Users/heliadinh/Desktop/CS personal projects/SmartPantry/.nvmrc)`
+- Python: `>=3.10` for the backend
 
 If you use `nvm`, run this from the repo root before working on the frontend:
 
@@ -35,7 +35,7 @@ pip install -e ".[dev,ml]"
 uvicorn app.main:app --reload --port 8000
 ```
 
-API: http://localhost:8000 — Docs: http://localhost:8000/docs
+API: [http://localhost:8000](http://localhost:8000) — Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 If you want the backend to prefer YOLO proposals, keep `DETECTION_PROVIDER=yolo`. The app will still fall back to the mock detector if YOLO or its dependencies fail at runtime.
 
@@ -49,7 +49,7 @@ npm ci
 npm run dev
 ```
 
-App: http://localhost:3000 — Proxies API to backend via `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`).
+App: [http://localhost:3000](http://localhost:3000) — Proxies API to backend via `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`).
 
 If frontend dependencies ever look corrupted, the safe recovery path is:
 
@@ -69,14 +69,14 @@ On push/PR to `main`: backend tests (pytest), frontend lint + build.
 
 ## Milestones
 
-1. **Scaffold & hello world** — Done: health check, landing page, CI.
-2. **Auth + inventory foundation** — Done: user auth, timezone, inventory CRUD.
-3. **Image upload + detection sessions** — Done: authenticated upload, storage abstraction, proposal persistence.
-4. **Detection review UX** — Done: grouped/per-box review, manual point-add, YOLO path with mock fallback.
-5. **Human-in-the-loop confirmation** — Done: confirm/add/update/reject flow with inventory change logs.
-6. **Recipe recommendations** — Next: inventory-aware ranking, recipe detail page, like/dislike and saved recipe book.
-7. **Deployment hardening** — Pending: production env docs, CORS, secret handling, storage guidance.
-8. **Performance, limits, polish** — Pending: rate limiting, cleanup jobs, evaluation, README refresh.
+1. **Scaffold & hello world** : health check, landing page, CI.
+2. **Auth + inventory foundation**: user auth, timezone, inventory CRUD.
+3. **Image upload + detection sessions**: authenticated upload, storage abstraction, proposal persistence.
+4. **Detection review UX**: grouped/per-box review, manual point-add, YOLO path with mock fallback.
+5. **Human-in-the-loop confirmation**: confirm/add/update/reject flow with inventory change logs.
+6. **Recipe recommendations**: inventory-aware ranking, recipe detail page, like/dislike and saved recipe book.
+7. **Deployment hardening**: production env docs, CORS, secret handling, storage guidance.
+8. **Performance, limits, polish**: rate limiting, cleanup jobs, evaluation, README refresh.
 
 ## License
 

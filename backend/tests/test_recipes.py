@@ -3,6 +3,7 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from typing import Optional
 
 from app.db import Base, SessionLocal, engine, ensure_sqlite_schema_compatibility
 from app.main import app
@@ -63,13 +64,19 @@ def seed_recipe(
     *,
     title: str,
     slug: str,
-    cuisine: str | None,
-    total_minutes: int | None,
-    tags: list[str],
-    ingredients: list[str],
-    instructions_text: str | None = None,
-    source_url: str | None = None,
-    rating: float | None = None,
+    # cuisine: str | None,
+    cuisine: Optional[str] = None,
+    # total_minutes: int | None,
+    total_minutes: Optional[int] = None,
+    # tags: list[str],
+    tags: list[str] = [],
+    ingredients: list[str] = [],
+    # instructions_text: str | None = None,
+    instructions_text: Optional[str] = None,
+    # source_url: str | None = None,
+    source_url: Optional[str] = None,
+    # rating: float | None = None,
+    rating: Optional[float] = None,
 ) -> int:
     with SessionLocal() as db:
         recipe = Recipe(

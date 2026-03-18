@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.10"
 
       - name: Install backend deps
         run: |
@@ -42,7 +42,7 @@ jobs:
           node-version: "20"
 
       - name: Install frontend deps
-        run: npm install
+        run: npm ci
 
       - name: Lint and typecheck
         run: npm run lint
