@@ -21,6 +21,7 @@ type RecipeDetail = {
   source_url?: string | null;
   image_url?: string | null;
   rating?: number | null;
+  current_feedback?: "like" | "dislike" | null;
   prep_minutes?: number | null;
   cook_minutes?: number | null;
   total_minutes?: number | null;
@@ -59,6 +60,7 @@ export default function RecipeDetailPage() {
   const [recipe, setRecipe] = useState<RecipeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
 
   useEffect(() => {
     const savedToken = localStorage.getItem("smartpantry_token");
@@ -90,12 +92,33 @@ export default function RecipeDetailPage() {
     void loadRecipe();
   }, [params?.id, token]);
 
+  async function submitFeedback(feedbackType: "like" | "dislike") {
+    if (!token || !recipe) return;
+    setFeedbackLoading(true);
+    const res = await fetch(`${API_BASE}/recipes/${recipe.id}/feedback`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ feedback_type: feedbackType }),
+    });
+    if (!res.ok) {
+      setError(`Could not save recipe feedback (${res.status}).`);
+      setFeedbackLoading(false);
+      return;
+    }
+    setRecipe((prev) => (prev ? { ...prev, current_feedback: feedbackType } : prev));
+    setFeedbackLoading(false);
+  }
+
   return (
     <main className="app-wrap">
       <section className="shell">
         <div className="card detail-shell">
           <div className="row-gap">
             <Link href="/">Back to Dashboard</Link>
+            <Link href="/recipes/book">Saved Recipes</Link>
             {recipe && (
               <a href={buildAllrecipesSearchUrl(recipe.title)} target="_blank" rel="noreferrer">
                 Search on Allrecipes
@@ -118,6 +141,11 @@ export default function RecipeDetailPage() {
                   {typeof recipe.rating === "number" && (
                     <p className="tiny-text">Rating: {recipe.rating.toFixed(1)} / 5</p>
                   )}
+                  {recipe.current_feedback && (
+                    <p className="tiny-text">
+                      Saved state: {recipe.current_feedback === "like" ? "Liked" : "Disliked"}
+                    </p>
+                  )}
                   <p className="tiny-text">
                     Total {recipe.total_minutes ?? "N/A"} min
                     {recipe.prep_minutes ? ` | Prep ${recipe.prep_minutes}` : ""}
@@ -127,6 +155,23 @@ export default function RecipeDetailPage() {
                 </div>
 
                 <RecipeDetailImage src={recipe.image_url} alt={recipe.title} />
+              </div>
+
+              <div className="row-gap">
+                <button
+                  className={recipe.current_feedback === "like" ? "feedback-button-liked" : undefined}
+                  onClick={() => void submitFeedback("like")}
+                  disabled={feedbackLoading}
+                >
+                  {recipe.current_feedback === "like" ? "Liked" : "Like"}
+                </button>
+                <button
+                  className={recipe.current_feedback === "dislike" ? "feedback-button-disliked" : undefined}
+                  onClick={() => void submitFeedback("dislike")}
+                  disabled={feedbackLoading}
+                >
+                  Dislike
+                </button>
               </div>
 
               {recipe.dietary_tags.length > 0 && (

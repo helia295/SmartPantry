@@ -1,7 +1,7 @@
 from app.models.user import User
 from app.models.inventory import InventoryChangeLog, InventoryItem
 from app.models.image import DetectionProposal, DetectionSession, Image
-from app.models.recipe import Recipe, RecipeIngredient
+from app.models.recipe import Recipe, RecipeFeedback, RecipeIngredient
 
 __all__ = [
     "User",
@@ -12,4 +12,5 @@ __all__ = [
     "DetectionProposal",
     "Recipe",
     "RecipeIngredient",
+    "RecipeFeedback",
 ]

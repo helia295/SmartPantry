@@ -14,17 +14,29 @@ class Base(DeclarativeBase):
     """Base class for all ORM models."""
 
 
-# For SQLite we need check_same_thread=False for use with FastAPI.
-engine = create_engine(
-    settings.database_url,
-    connect_args=(
-        {"check_same_thread": False, "timeout": 30}
-        if settings.database_url.startswith("sqlite")
-        else {}
-    ),
-)
+def build_engine(database_url: str):
+    return create_engine(
+        database_url,
+        connect_args=(
+            {"check_same_thread": False, "timeout": 30}
+            if database_url.startswith("sqlite")
+            else {}
+        ),
+    )
+
+
+engine = build_engine(settings.database_url)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def configure_database(database_url: str) -> None:
+    global engine, SessionLocal
+
+    settings.database_url = database_url
+    engine.dispose()
+    engine = build_engine(database_url)
+    SessionLocal.configure(bind=engine)
 
 
 def get_db() -> Generator:

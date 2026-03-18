@@ -65,7 +65,7 @@ def test_split_ingredients_splits_pipe_delimited_values():
 
 def test_normalize_ingredient_value_removes_quantity_units_and_plural_noise():
     assert normalize_ingredient_value("2 peaches, sliced") == "peach"
-    assert normalize_ingredient_value("1 can whole kernel corn") == "whole kernel corn"
+    assert normalize_ingredient_value("1 can whole kernel corn") == "corn"
     assert normalize_ingredient_value("1/2 teaspoon Salt") == "salt"
     assert normalize_ingredient_value("3 cups All-purpose Flour") == "all-purpose flour"
     assert normalize_ingredient_value("¼ cup olive oil") == "olive oil"

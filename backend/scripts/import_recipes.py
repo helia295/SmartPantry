@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db import Base, SessionLocal, engine
 from app.models import Recipe, RecipeIngredient
-from app.services.recipes import normalize_term
+from app.services.recipes import canonicalize_ingredient_phrase, normalize_term
 
 
 SLUG_INVALID_CHARS = re.compile(r"[^a-z0-9]+")
@@ -218,7 +218,7 @@ def normalize_ingredient_value(raw_value: str) -> str:
 
     singular_tokens = [singularize_token(token) for token in filtered_tokens]
     result = " ".join(singular_tokens).strip()
-    return result
+    return canonicalize_ingredient_phrase(result)
 
 
 def split_ingredients(raw_value: Any) -> list[str]:

@@ -23,7 +23,10 @@ from app.schemas.image import (
     ManualProposalCreate,
 )
 from app.schemas.recipe import (
+    RecipeBookListResponse,
     RecipeDetailRead,
+    RecipeFeedbackRead,
+    RecipeFeedbackRequest,
     RecipeIngredientRead,
     RecipeRecommendationListResponse,
     RecipeRecommendationRead,
@@ -58,4 +61,7 @@ __all__ = [
     "RecipeDetailRead",
     "RecipeRecommendationRead",
     "RecipeRecommendationListResponse",
+    "RecipeBookListResponse",
+    "RecipeFeedbackRequest",
+    "RecipeFeedbackRead",
 ]

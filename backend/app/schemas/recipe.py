@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -22,6 +22,7 @@ class RecipeSummaryRead(BaseModel):
     source_url: Optional[str] = None
     image_url: Optional[str] = None
     rating: Optional[float] = None
+    current_feedback: Optional[Literal["like", "dislike"]] = None
     prep_minutes: Optional[int] = None
     cook_minutes: Optional[int] = None
     total_minutes: Optional[int] = None
@@ -47,4 +48,21 @@ class RecipeRecommendationRead(BaseModel):
 
 
 class RecipeRecommendationListResponse(BaseModel):
+    page: int
+    page_size: int
+    total_results: int
+    total_pages: int
     results: list[RecipeRecommendationRead]
+
+
+class RecipeBookListResponse(BaseModel):
+    results: list[RecipeSummaryRead]
+
+
+class RecipeFeedbackRequest(BaseModel):
+    feedback_type: Literal["like", "dislike"]
+
+
+class RecipeFeedbackRead(BaseModel):
+    recipe_id: int
+    feedback_type: Literal["like", "dislike"]

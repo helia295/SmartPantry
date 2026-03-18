@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -42,3 +42,20 @@ class RecipeIngredient(Base):
     ingredient_normalized: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     quantity_text: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     is_optional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class RecipeFeedback(Base):
+    __tablename__ = "recipe_feedback"
+    __table_args__ = (UniqueConstraint("user_id", "recipe_id", name="uq_recipe_feedback_user_recipe"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    recipe_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("recipes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    feedback_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
