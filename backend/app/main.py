@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api import auth, detections, health, images, inventory
+from app.api import auth, detections, health, images, inventory, recipes
 from app.db import Base, engine, ensure_sqlite_schema_compatibility
 
 app = FastAPI(
@@ -27,6 +27,7 @@ app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 app.include_router(images.router, prefix="/images", tags=["images"])
 app.include_router(detections.router, prefix="/detections", tags=["detections"])
+app.include_router(recipes.router, prefix="/recipes", tags=["recipes"])
 
 
 @app.get("/")

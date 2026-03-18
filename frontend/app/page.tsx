@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ChangeEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE =
@@ -24,6 +25,40 @@ type InventoryItem = {
 };
 
 type Option = { value: string; label: string };
+type RecipeSummary = {
+  id: number;
+  title: string;
+  slug: string;
+  source_name?: string | null;
+  source_url?: string | null;
+  image_url?: string | null;
+  rating?: number | null;
+  current_feedback?: "like" | "dislike" | null;
+  prep_minutes?: number | null;
+  cook_minutes?: number | null;
+  total_minutes?: number | null;
+  servings?: number | null;
+  cuisine?: string | null;
+  dietary_tags: string[];
+  nutrition: Record<string, string | number | boolean | null>;
+};
+
+type RecipeRecommendation = {
+  recipe: RecipeSummary;
+  score: number;
+  inventory_match_count: number;
+  required_ingredient_count: number;
+  matched_ingredients: string[];
+  missing_ingredients: string[];
+};
+
+type RecipeRecommendationResponse = {
+  page: number;
+  page_size: number;
+  total_results: number;
+  total_pages: number;
+  results: RecipeRecommendation[];
+};
 
 type ImageRecord = {
   id: number;
@@ -162,6 +197,54 @@ function formatDate(isoValue?: string | null, timezone?: string): string {
   }
 }
 
+function buildAllrecipesSearchUrl(title: string): string {
+  return `https://www.allrecipes.com/search?q=${encodeURIComponent(title)}`;
+}
+
+function RecipeCardImage({ src, alt }: { src?: string | null; alt: string }) {
+  const [broken, setBroken] = useState(false);
+
+  if (!src || broken) {
+    return <div className="recipe-image recipe-image-fallback">Recipe image unavailable</div>;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="recipe-image"
+      onError={() => setBroken(true)}
+    />
+  );
+}
+
+function getVisiblePageNumbers(currentPage: number, totalPages: number): number[] {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set<number>([1, totalPages, currentPage]);
+  for (let page = currentPage - 1; page <= currentPage + 1; page += 1) {
+    if (page > 1 && page < totalPages) pages.add(page);
+  }
+
+  if (currentPage <= 3) {
+    pages.add(2);
+    pages.add(3);
+    pages.add(4);
+  }
+
+  if (currentPage >= totalPages - 2) {
+    pages.add(totalPages - 1);
+    pages.add(totalPages - 2);
+    pages.add(totalPages - 3);
+  }
+
+  return Array.from(pages)
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((a, b) => a - b);
+}
+
 export default function Home() {
   const [health, setHealth] = useState<Health>(null);
   const [error, setError] = useState<string | null>(null);
@@ -190,6 +273,15 @@ export default function Home() {
   const [manualPointMode, setManualPointMode] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [showRecipeFinder, setShowRecipeFinder] = useState(false);
+  const [recipeMainIngredients, setRecipeMainIngredients] = useState("");
+  const [recipeMaxTotalMinutes, setRecipeMaxTotalMinutes] = useState("");
+  const [recipeResults, setRecipeResults] = useState<RecipeRecommendation[]>([]);
+  const [recipesLoading, setRecipesLoading] = useState(false);
+  const [recipePage, setRecipePage] = useState(1);
+  const [recipePageSize] = useState(10);
+  const [recipeTotalPages, setRecipeTotalPages] = useState(0);
+  const [recipeTotalResults, setRecipeTotalResults] = useState(0);
 
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const libraryInputRef = useRef<HTMLInputElement | null>(null);
@@ -796,6 +888,117 @@ export default function Home() {
     }
   }
 
+  async function findRecipes() {
+    await findRecipesPage(1);
+  }
+
+  async function findRecipesPage(page: number) {
+    if (!token) {
+      setMessage("Log in first.");
+      return;
+    }
+
+    const params = new URLSearchParams();
+    if (recipeMainIngredients.trim()) params.set("main_ingredients", recipeMainIngredients.trim());
+    if (recipeMaxTotalMinutes.trim()) params.set("max_total_minutes", recipeMaxTotalMinutes.trim());
+    params.set("page", String(page));
+    params.set("page_size", String(recipePageSize));
+
+    setRecipesLoading(true);
+    const res = await fetch(`${API_BASE}/recipes/recommendations?${params.toString()}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      setRecipesLoading(false);
+      setMessage(await parseError(res));
+      return;
+    }
+
+    const payload = (await res.json()) as RecipeRecommendationResponse;
+    setRecipeResults(payload.results);
+    setRecipePage(payload.page);
+    setRecipeTotalPages(payload.total_pages);
+    setRecipeTotalResults(payload.total_results);
+    setRecipesLoading(false);
+    setMessage(
+      payload.total_results > 0
+        ? `Loaded page ${payload.page} of ${Math.max(payload.total_pages, 1)} recipe recommendations.`
+        : "No recipe matches found for the current inventory and filters."
+    );
+  }
+
+  async function submitRecipeFeedback(recipeId: number, feedbackType: "like" | "dislike") {
+    if (!token) {
+      setMessage("Log in first.");
+      return;
+    }
+
+    const res = await fetch(`${API_BASE}/recipes/${recipeId}/feedback`, {
+      method: "POST",
+      headers: authHeaders("application/json"),
+      body: JSON.stringify({ feedback_type: feedbackType }),
+    });
+    if (!res.ok) {
+      setMessage(await parseError(res));
+      return;
+    }
+
+    if (feedbackType === "dislike") {
+      const nextTotalResults = Math.max(0, recipeTotalResults - 1);
+      const nextTotalPages = nextTotalResults > 0 ? Math.ceil(nextTotalResults / recipePageSize) : 0;
+      const nextPage = nextTotalPages > 0 ? Math.min(recipePage, nextTotalPages) : 1;
+      await findRecipesPage(nextPage);
+      setMessage("Recipe disliked. It will be excluded from future recommendations.");
+      return;
+    }
+
+    setRecipeResults((prev) =>
+      prev.map((result) =>
+        result.recipe.id === recipeId
+          ? {
+              ...result,
+              recipe: { ...result.recipe, current_feedback: feedbackType },
+            }
+          : result
+      )
+    );
+    setMessage("Recipe saved to your recipe book.");
+  }
+
+  function renderRecipePagination() {
+    if (recipeTotalPages <= 1) return null;
+
+    const pages = getVisiblePageNumbers(recipePage, recipeTotalPages);
+    return (
+      <div className="recipe-pagination">
+        <button onClick={() => void findRecipesPage(recipePage - 1)} disabled={recipePage <= 1 || recipesLoading}>
+          &lt;
+        </button>
+        {pages.map((pageNumber, index) => [
+          index > 0 && pageNumber - pages[index - 1] > 1 ? (
+            <span key={`gap-${pages[index - 1]}-${pageNumber}`} className="pagination-ellipsis">
+              ...
+            </span>
+          ) : null,
+          <button
+            key={pageNumber}
+            className={pageNumber === recipePage ? "pagination-button-active" : undefined}
+            onClick={() => void findRecipesPage(pageNumber)}
+            disabled={recipesLoading}
+          >
+            {pageNumber}
+          </button>,
+        ])}
+        <button
+          onClick={() => void findRecipesPage(recipePage + 1)}
+          disabled={recipePage >= recipeTotalPages || recipesLoading}
+        >
+          &gt;
+        </button>
+      </div>
+    );
+  }
+
   const activeBox =
     activeProposal &&
     activeProposal.bbox_x !== null &&
@@ -1073,6 +1276,126 @@ export default function Home() {
             )}
           </section>
         </div>
+
+        <section className="card">
+          <div className="hero-row">
+            <div>
+              <h2>Find Recipes</h2>
+              <p className="muted-text">
+                Match recipes against your confirmed inventory and optional preferences.
+              </p>
+            </div>
+            <div className="row-gap">
+              <Link href="/recipes/book">Saved Recipes</Link>
+              <button onClick={() => setShowRecipeFinder((prev) => !prev)}>
+                {showRecipeFinder ? "Hide Filters" : "Find Recipe"}
+              </button>
+            </div>
+          </div>
+
+          {showRecipeFinder && (
+            <div className="recipe-toolbar">
+              <input
+                value={recipeMainIngredients}
+                onChange={(e) => setRecipeMainIngredients(e.target.value)}
+                placeholder="Main ingredients (comma-separated)"
+              />
+              <input
+                value={recipeMaxTotalMinutes}
+                onChange={(e) => setRecipeMaxTotalMinutes(e.target.value)}
+                type="number"
+                min="1"
+                step="1"
+                placeholder="Max total minutes"
+              />
+              <button onClick={() => void findRecipes()} disabled={recipesLoading}>
+                {recipesLoading ? "Loading..." : "Get Recommendations"}
+              </button>
+            </div>
+          )}
+
+          {showRecipeFinder && (
+            <p className="tiny-text">
+              Main ingredients are prioritized first in ranking, while all inventory-matched recipes stay in the result set.
+            </p>
+          )}
+
+          {recipeResults.length > 0 && (
+            <>
+              <p className="tiny-text">
+                Showing page {recipePage} of {Math.max(recipeTotalPages, 1)} ({recipeTotalResults} total matches)
+              </p>
+              <div className="recipe-grid">
+                {recipeResults.map((result) => (
+                  <article
+                    key={result.recipe.id}
+                    className={`recipe-card ${result.recipe.current_feedback ? `recipe-card-${result.recipe.current_feedback}` : ""}`}
+                  >
+                    <RecipeCardImage src={result.recipe.image_url} alt={result.recipe.title} />
+
+                    <div className="recipe-meta">
+                      <div>
+                        <h3>{result.recipe.title}</h3>
+                        <p className="tiny-text">
+                          {result.recipe.source_name || "Unknown source"}
+                          {result.recipe.cuisine ? ` - ${result.recipe.cuisine}` : ""}
+                        </p>
+                      </div>
+                      {typeof result.recipe.rating === "number" && (
+                        <p className="tiny-text">Rating: {result.recipe.rating.toFixed(1)} / 5</p>
+                      )}
+                      {result.recipe.current_feedback && (
+                        <p className="tiny-text">
+                          Saved state: {result.recipe.current_feedback === "like" ? "Liked" : "Disliked"}
+                        </p>
+                      )}
+                      <p className="tiny-text">
+                        Score {result.score.toFixed(2)} - Matched {result.inventory_match_count}/
+                        {result.required_ingredient_count}
+                      </p>
+                      <p className="tiny-text">
+                        Time: {result.recipe.total_minutes ?? "N/A"} min
+                        {result.recipe.prep_minutes ? ` | Prep ${result.recipe.prep_minutes}` : ""}
+                        {result.recipe.cook_minutes ? ` | Cook ${result.recipe.cook_minutes}` : ""}
+                      </p>
+                      <p className="tiny-text">
+                        Missing:{" "}
+                        {result.missing_ingredients.length > 0
+                          ? result.missing_ingredients.slice(0, 4).join(", ")
+                          : "None"}
+                      </p>
+                      <div className="row-gap">
+                        <Link href={`/recipes/${result.recipe.id}`}>View Details</Link>
+                        <a
+                          href={buildAllrecipesSearchUrl(result.recipe.title)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Search on Allrecipes
+                        </a>
+                      </div>
+                      <div className="row-gap">
+                        <button
+                          className={result.recipe.current_feedback === "like" ? "feedback-button-liked" : undefined}
+                          onClick={() => void submitRecipeFeedback(result.recipe.id, "like")}
+                        >
+                          {result.recipe.current_feedback === "like" ? "Liked" : "Like"}
+                        </button>
+                        <button
+                          className={result.recipe.current_feedback === "dislike" ? "feedback-button-disliked" : undefined}
+                          onClick={() => void submitRecipeFeedback(result.recipe.id, "dislike")}
+                        >
+                          Dislike
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              {renderRecipePagination()}
+            </>
+          )}
+        </section>
 
         <div className="card">
           <h3>System</h3>
