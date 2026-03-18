@@ -3,7 +3,7 @@ name = "smartpantry-backend"
 version = "0.1.0"
 description = "SmartPantry API — AI-powered kitchen inventory"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
