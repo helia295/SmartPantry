@@ -59,10 +59,12 @@ Most backend settings are read from `backend/.env` or exported shell variables.
 
 Core settings:
 
+- `APP_ENV` : `development` locally, `production` in deployed environments
 - `DATABASE_URL` : defaults to local SQLite `sqlite:///./smartpantry.db`
 - `JWT_SECRET` : must be overridden for any non-local deployment
 - `JWT_ALGORITHM`
 - `ACCESS_TOKEN_EXPIRE_MINUTES`
+- `CORS_ORIGINS` : comma-separated list of trusted frontend origins
 
 Upload and detection:
 
@@ -100,6 +102,26 @@ Planned next step:
 
 The backend currently creates tables automatically on startup for MVP simplicity. Formal migrations are still a future hardening step.
 
+## Deployment Posture
+
+Current local-development defaults are intentionally easy to run, but they are not the intended production posture.
+
+Development-friendly defaults:
+- `APP_ENV=development`
+- SQLite
+- local storage
+- development JWT fallback secret
+- localhost CORS defaults
+
+Production-oriented target:
+- `APP_ENV=production`
+- PostgreSQL
+- strong `JWT_SECRET`
+- explicit deployed frontend origins in `CORS_ORIGINS`
+- `STORAGE_PROVIDER=r2` or another object-storage-backed option
+
+The backend now emits warnings at startup when clearly unsafe production-like settings are still in use.
+
 ## Storage Modes
 
 ### Local storage
@@ -120,6 +142,11 @@ This separation is intentional:
 
 - object storage is for blobs/files
 - the database is for structured relational state
+
+Retention note:
+- `IMAGE_RETENTION_DAYS` defines the intended retention policy
+- the app does not yet run an automatic cleanup job for expired images
+- bucket lifecycle rules can help on the storage side, but DB-side cleanup/orchestration is still future work
 
 ## Detection Modes
 
@@ -202,6 +229,5 @@ That isolation is intentional because recipe import and integration tests are de
 - no formal migration framework yet
 - no rate limiting yet
 - no background cleanup job for expired images yet
-- startup still uses MVP-style auto-create rather than a production migration path
-- deployment CORS/secret handling docs are still being expanded in Milestone 7
-
+- startup still uses auto-create rather than a formal production migration path
+- PostgreSQL deployment path is documented but not yet implemented in-repo
