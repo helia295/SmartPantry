@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SmartPantry",
-  description: "AI-powered kitchen inventory and recipe recommendations",
+  title: "SmartPantry | Cozy Pantry Assistant",
+  description: "A cheerful pantry companion for image-assisted inventory tracking and recipe discovery.",
 };
 
 export default function RootLayout({

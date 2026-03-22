@@ -65,6 +65,8 @@ class Settings:
         self.detection_confidence_threshold: float = float(
             os.getenv("DETECTION_CONFIDENCE_THRESHOLD", "0.35")
         )
+        self.yolo_inference_size: int = int(os.getenv("YOLO_INFERENCE_SIZE", "960"))
+        self.yolo_max_image_dim: int = int(os.getenv("YOLO_MAX_IMAGE_DIM", "1600"))
 
         # Local storage path for development fallback.
         self.local_storage_dir: str = os.getenv("LOCAL_STORAGE_DIR", "./storage")

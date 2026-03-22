@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -17,6 +18,7 @@ from app.schemas import (
     ImageUploadResult,
 )
 from app.services.detection import run_detection
+from app.services.images import cleanup_expired_images
 from app.services.storage import get_storage_service
 
 
@@ -35,6 +37,7 @@ def list_images(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ImageListResponse:
+    cleanup_expired_images(db)
     now = datetime.now(timezone.utc)
     rows = (
         db.query(Image)
@@ -46,7 +49,61 @@ def list_images(
         .order_by(Image.created_at.desc())
         .all()
     )
-    return ImageListResponse(results=rows)
+    image_ids = [row.id for row in rows]
+    session_rows = (
+        db.query(DetectionSession)
+        .filter(
+            DetectionSession.user_id == current_user.id,
+            DetectionSession.image_id.in_(image_ids),
+        )
+        .order_by(DetectionSession.started_at.desc())
+        .all()
+        if image_ids
+        else []
+    )
+    latest_session_by_image: dict[int, DetectionSession] = {}
+    for session in session_rows:
+        latest_session_by_image.setdefault(session.image_id, session)
+
+    session_ids = [session.id for session in latest_session_by_image.values()]
+    pending_counts = {
+        session_id: pending_count
+        for session_id, pending_count in (
+            db.query(
+                DetectionProposal.session_id,
+                func.count(DetectionProposal.id),
+            )
+            .filter(
+                DetectionProposal.session_id.in_(session_ids),
+                DetectionProposal.state == "pending",
+            )
+            .group_by(DetectionProposal.session_id)
+            .all()
+            if session_ids
+            else []
+        )
+    }
+
+    results = []
+    for row in rows:
+        session = latest_session_by_image.get(row.id)
+        results.append(
+            {
+                "id": row.id,
+                "user_id": row.user_id,
+                "storage_key": row.storage_key,
+                "original_filename": row.original_filename,
+                "content_type": row.content_type,
+                "size_bytes": row.size_bytes,
+                "created_at": row.created_at,
+                "expires_at": row.expires_at,
+                "deleted_at": row.deleted_at,
+                "detection_session_id": session.id if session else None,
+                "detection_session_status": session.status if session else None,
+                "pending_proposal_count": pending_counts.get(session.id, 0) if session else 0,
+            }
+        )
+    return ImageListResponse(results=results)
 
 
 @router.get("/{image_id}/content")
@@ -55,12 +112,15 @@ def get_image_content(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
+    cleanup_expired_images(db)
+    now = datetime.now(timezone.utc)
     image = (
         db.query(Image)
         .filter(
             Image.id == image_id,
             Image.user_id == current_user.id,
             Image.deleted_at.is_(None),
+            Image.expires_at > now,
         )
         .first()
     )
@@ -82,6 +142,7 @@ async def upload_images(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ImageUploadResponse:
+    cleanup_expired_images(db)
     settings = get_settings()
     if len(files) == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files uploaded")

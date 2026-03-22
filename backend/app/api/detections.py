@@ -191,6 +191,16 @@ def confirm_detection_session(
                 detail=f"Proposal {action.proposal_id} does not belong to this session",
             )
 
+        grouped_proposals = [proposal]
+        if action.apply_grouped_label and proposal.source == "auto":
+            grouped_proposals = [
+                candidate
+                for candidate in proposal_map.values()
+                if candidate.source == "auto"
+                and candidate.label_normalized == proposal.label_normalized
+                and candidate.state == "pending"
+            ]
+
         confirmed_name = (action.name or proposal.label_raw or "unknown item").strip()
         confirmed_quantity = (
             action.quantity if action.quantity is not None else (proposal.quantity_suggested or 1.0)
@@ -205,16 +215,21 @@ def confirm_detection_session(
             else bool(proposal.is_perishable_suggested)
         )
 
-        proposal.label_raw = confirmed_name
-        proposal.label_normalized = normalize_name(confirmed_name)
-        proposal.quantity_suggested = float(confirmed_quantity)
-        proposal.quantity_unit = confirmed_unit
-        proposal.category_suggested = confirmed_category
-        proposal.is_perishable_suggested = confirmed_perishable
+        per_proposal_quantity = float(confirmed_quantity) / max(len(grouped_proposals), 1)
+        normalized_name = normalize_name(confirmed_name)
+        for grouped_proposal in grouped_proposals:
+            grouped_proposal.label_raw = confirmed_name
+            grouped_proposal.label_normalized = normalized_name
+            grouped_proposal.quantity_suggested = per_proposal_quantity
+            grouped_proposal.quantity_unit = confirmed_unit
+            grouped_proposal.category_suggested = confirmed_category
+            grouped_proposal.is_perishable_suggested = confirmed_perishable
 
         if action.action == "reject":
-            proposal.state = "rejected"
-            rejected += 1
+            for grouped_proposal in grouped_proposals:
+                grouped_proposal.state = "rejected"
+                db.add(grouped_proposal)
+            rejected += len(grouped_proposals)
             log = InventoryChangeLog(
                 user_id=current_user.id,
                 inventory_item_id=None,
@@ -240,7 +255,7 @@ def confirm_detection_session(
             target_item = InventoryItem(
                 user_id=current_user.id,
                 name=confirmed_name,
-                normalized_name=normalize_name(confirmed_name),
+                normalized_name=normalized_name,
                 quantity=float(confirmed_quantity),
                 unit=confirmed_unit,
                 category=confirmed_category,
@@ -266,7 +281,7 @@ def confirm_detection_session(
                     db.query(InventoryItem)
                     .filter(
                         InventoryItem.user_id == current_user.id,
-                        InventoryItem.normalized_name == normalize_name(confirmed_name),
+                        InventoryItem.normalized_name == normalized_name,
                     )
                     .order_by(InventoryItem.id.asc())
                     .first()
@@ -289,8 +304,9 @@ def confirm_detection_session(
             change_type = "update"
             delta_quantity = float(confirmed_quantity)
 
-        proposal.state = "accepted"
-        db.add(proposal)
+        for grouped_proposal in grouped_proposals:
+            grouped_proposal.state = "accepted"
+            db.add(grouped_proposal)
         log = InventoryChangeLog(
             user_id=current_user.id,
             inventory_item_id=target_item.id if target_item is not None else None,

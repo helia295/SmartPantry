@@ -7,7 +7,15 @@ from typing import Optional
 
 from app.db import Base, SessionLocal, engine, ensure_sqlite_schema_compatibility
 from app.main import app
-from app.models import InventoryItem, Recipe, RecipeFeedback, RecipeIngredient
+from app.models import (
+    InventoryChangeLog,
+    InventoryItem,
+    Recipe,
+    RecipeFeedback,
+    RecipeIngredient,
+    RecipeTag,
+    RecipeTagLink,
+)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -26,12 +34,16 @@ def client():
 @pytest.fixture(autouse=True)
 def clear_recipe_tables():
     with SessionLocal() as db:
+        db.query(RecipeTagLink).delete()
+        db.query(RecipeTag).delete()
         db.query(RecipeFeedback).delete()
         db.query(RecipeIngredient).delete()
         db.query(Recipe).delete()
         db.commit()
     yield
     with SessionLocal() as db:
+        db.query(RecipeTagLink).delete()
+        db.query(RecipeTag).delete()
         db.query(RecipeFeedback).delete()
         db.query(RecipeIngredient).delete()
         db.query(Recipe).delete()
@@ -45,10 +57,11 @@ def unique_email() -> str:
 async def register_and_login(client: AsyncClient) -> str:
     email = unique_email()
     password = "testpassword123"
+    display_name = "Recipe Tester"
 
     register_res = await client.post(
         "/auth/register",
-        json={"email": email, "password": password},
+        json={"email": email, "display_name": display_name, "password": password},
     )
     assert register_res.status_code == 201
 
@@ -358,6 +371,263 @@ async def test_recipe_feedback_updates_detail_and_book(client: AsyncClient):
     assert len(book_body["results"]) == 1
     assert book_body["results"][0]["title"] == "Liked Pasta"
     assert book_body["results"][0]["current_feedback"] == "like"
+
+
+@pytest.mark.asyncio
+async def test_recipe_feedback_can_be_removed(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    recipe_id = seed_recipe(
+        title="Orange Salad",
+        slug="orange-salad",
+        ingredients=["orange", "mint"],
+        rating=4.2,
+    )
+
+    feedback_res = await client.post(
+        f"/recipes/{recipe_id}/feedback",
+        headers=headers,
+        json={"feedback_type": "like"},
+    )
+    assert feedback_res.status_code == 200
+
+    delete_res = await client.delete(f"/recipes/{recipe_id}/feedback", headers=headers)
+    assert delete_res.status_code == 204
+
+    detail_res = await client.get(f"/recipes/{recipe_id}", headers=headers)
+    assert detail_res.status_code == 200
+    assert detail_res.json()["current_feedback"] is None
+
+    book_res = await client.get("/recipes/book", headers=headers)
+    assert book_res.status_code == 200
+    assert book_res.json()["results"] == []
+
+
+@pytest.mark.asyncio
+async def test_favorite_recipe_tags_can_be_saved_and_listed(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    recipe_id = seed_recipe(
+        title="Tagged Oatmeal",
+        slug="tagged-oatmeal",
+        ingredients=["oats", "milk"],
+    )
+
+    like_res = await client.post(
+        f"/recipes/{recipe_id}/feedback",
+        headers=headers,
+        json={"feedback_type": "like"},
+    )
+    assert like_res.status_code == 200
+
+    tags_res = await client.put(
+        f"/recipes/{recipe_id}/tags",
+        headers=headers,
+        json={"tags": ["#breakfast", "quick", "Breakfast"]},
+    )
+    assert tags_res.status_code == 200
+    assert tags_res.json()["tags"] == ["breakfast", "quick"]
+
+    book_res = await client.get("/recipes/book", headers=headers)
+    assert book_res.status_code == 200
+    body = book_res.json()
+    assert body["available_tags"] == ["breakfast", "quick"]
+    assert body["results"][0]["favorite_tags"] == ["breakfast", "quick"]
+
+
+@pytest.mark.asyncio
+async def test_recipe_tags_are_removed_when_recipe_is_unfavorited(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    recipe_id = seed_recipe(
+        title="Tagged Pasta",
+        slug="tagged-pasta",
+        ingredients=["pasta", "butter"],
+    )
+
+    like_res = await client.post(
+        f"/recipes/{recipe_id}/feedback",
+        headers=headers,
+        json={"feedback_type": "like"},
+    )
+    assert like_res.status_code == 200
+
+    tags_res = await client.put(
+        f"/recipes/{recipe_id}/tags",
+        headers=headers,
+        json={"tags": ["dinner", "comfort-food"]},
+    )
+    assert tags_res.status_code == 200
+
+    delete_res = await client.delete(f"/recipes/{recipe_id}/feedback", headers=headers)
+    assert delete_res.status_code == 204
+
+    book_res = await client.get("/recipes/book", headers=headers)
+    assert book_res.status_code == 200
+    body = book_res.json()
+    assert body["results"] == []
+    assert body["available_tags"] == []
+
+
+@pytest.mark.asyncio
+async def test_recipe_cook_preview_returns_matches_and_inventory_options(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    user_id = get_user_id_from_token(token)
+
+    add_inventory_item(user_id, "egg")
+    add_inventory_item(user_id, "milk")
+
+    with SessionLocal() as db:
+        recipe = Recipe(
+            title="Breakfast Scramble",
+            slug="breakfast-scramble",
+            dietary_tags_json=json.dumps([]),
+            nutrition_json=json.dumps({}),
+            search_text="breakfast scramble egg milk salt",
+        )
+        db.add(recipe)
+        db.flush()
+        db.add(
+            RecipeIngredient(
+                recipe_id=recipe.id,
+                ingredient_raw="2 eggs",
+                ingredient_normalized="egg",
+                quantity_text=None,
+                is_optional=False,
+            )
+        )
+        db.add(
+            RecipeIngredient(
+                recipe_id=recipe.id,
+                ingredient_raw="200 ml milk",
+                ingredient_normalized="milk",
+                quantity_text=None,
+                is_optional=False,
+            )
+        )
+        db.add(
+            RecipeIngredient(
+                recipe_id=recipe.id,
+                ingredient_raw="1 pinch salt",
+                ingredient_normalized="salt",
+                quantity_text=None,
+                is_optional=False,
+            )
+        )
+        db.commit()
+        recipe_id = recipe.id
+
+    preview_res = await client.post(
+        f"/recipes/{recipe_id}/cook-preview",
+        headers=headers,
+        json={"multiplier": 1},
+    )
+    assert preview_res.status_code == 200
+    body = preview_res.json()
+    assert body["recipe_id"] == recipe_id
+    assert len(body["inventory_options"]) == 2
+    egg_row = next(row for row in body["items"] if row["ingredient_normalized"] == "egg")
+    assert egg_row["selected_inventory_item_name"] == "egg"
+    assert egg_row["match_status"] in {"matched", "needs_review"}
+
+
+@pytest.mark.asyncio
+async def test_recipe_cook_apply_updates_inventory_and_logs_change(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    user_id = get_user_id_from_token(token)
+
+    with SessionLocal() as db:
+        item = InventoryItem(
+            user_id=user_id,
+            name="Eggs",
+            normalized_name="egg",
+            quantity=8,
+            unit="count",
+            category="Dairy & Eggs",
+            is_perishable=True,
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        item_id = item.id
+
+    with SessionLocal() as db:
+        recipe = Recipe(
+            title="Egg Toast",
+            slug="egg-toast",
+            dietary_tags_json=json.dumps([]),
+            nutrition_json=json.dumps({}),
+            search_text="egg toast egg bread",
+        )
+        db.add(recipe)
+        db.flush()
+        db.add(
+            RecipeIngredient(
+                recipe_id=recipe.id,
+                ingredient_raw="2 eggs",
+                ingredient_normalized="egg",
+                quantity_text=None,
+                is_optional=False,
+            )
+        )
+        db.add(
+            RecipeIngredient(
+                recipe_id=recipe.id,
+                ingredient_raw="2 slices bread",
+                ingredient_normalized="bread",
+                quantity_text=None,
+                is_optional=False,
+            )
+        )
+        db.commit()
+        recipe_id = recipe.id
+
+    apply_res = await client.post(
+        f"/recipes/{recipe_id}/cook-apply",
+        headers=headers,
+        json={
+            "multiplier": 1,
+            "actions": [
+                {
+                    "ingredient_key": f"{recipe_id}:0",
+                    "ingredient_raw": "2 eggs",
+                    "ingredient_normalized": "egg",
+                    "inventory_item_id": item_id,
+                    "decision": "update",
+                    "new_quantity": 6,
+                },
+                {
+                    "ingredient_key": f"{recipe_id}:1",
+                    "ingredient_raw": "2 slices bread",
+                    "ingredient_normalized": "bread",
+                    "decision": "ignore",
+                },
+            ],
+        },
+    )
+    assert apply_res.status_code == 200
+    body = apply_res.json()
+    assert body["updated"] == 1
+    assert body["ignored"] == 1
+
+    with SessionLocal() as db:
+        updated_item = db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
+        assert updated_item is not None
+        assert updated_item.quantity == 6
+        log = (
+            db.query(InventoryChangeLog)
+            .filter(
+                InventoryChangeLog.inventory_item_id == item_id,
+                InventoryChangeLog.change_type == "recipe_cooked_update",
+            )
+            .first()
+        )
+        assert log is not None
 
 
 @pytest.mark.asyncio

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
@@ -64,12 +66,16 @@ def update_inventory_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
 
     updates = item_in.model_dump(exclude_unset=True)
+    refresh_created_at = bool(updates.pop("refresh_created_at", False))
     if "name" in updates and updates["name"] is not None:
         updates["name"] = updates["name"].strip()
         updates["normalized_name"] = normalize_name(updates["name"])
 
     for key, value in updates.items():
         setattr(item, key, value)
+
+    if refresh_created_at:
+        item.created_at = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(item)

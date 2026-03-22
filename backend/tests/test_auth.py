@@ -35,15 +35,17 @@ def unique_email() -> str:
 async def test_register_and_login_and_me(client: AsyncClient):
     email = unique_email()
     password = "testpassword123"
+    display_name = "Pantry Pal"
 
     # Register
     r = await client.post(
         "/auth/register",
-        json={"email": email, "password": password},
+        json={"email": email, "display_name": display_name, "password": password},
     )
     assert r.status_code == 201
     data = r.json()
     assert data["email"] == email
+    assert data["display_name"] == display_name
     assert "id" in data
 
     # # Login
@@ -67,6 +69,7 @@ async def test_register_and_login_and_me(client: AsyncClient):
     assert r.status_code == 200
     me = r.json()
     assert me["email"] == email
+    assert me["display_name"] == display_name
     assert me["timezone"] == "UTC"
 
 
@@ -74,10 +77,11 @@ async def test_register_and_login_and_me(client: AsyncClient):
 async def test_update_timezone(client: AsyncClient):
     email = unique_email()
     password = "testpassword123"
+    display_name = "Timezone Tester"
 
     register_res = await client.post(
         "/auth/register",
-        json={"email": email, "password": password},
+        json={"email": email, "display_name": display_name, "password": password},
     )
     assert register_res.status_code == 201
 
@@ -97,3 +101,114 @@ async def test_update_timezone(client: AsyncClient):
     assert update_res.status_code == 200
     updated = update_res.json()
     assert updated["timezone"] == "America/New_York"
+    assert updated["display_name"] == display_name
+
+
+@pytest.mark.asyncio
+async def test_update_profile_details(client: AsyncClient):
+    email = unique_email()
+    password = "testpassword123"
+    display_name = "Profile Tester"
+
+    register_res = await client.post(
+        "/auth/register",
+        json={"email": email, "display_name": display_name, "password": password},
+    )
+    assert register_res.status_code == 201
+
+    login_res = await client.post(
+        "/auth/login",
+        data={"username": email, "password": password},
+    )
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    update_res = await client.patch(
+        "/auth/me",
+        headers=headers,
+        json={
+            "display_name": "Chef Helia",
+            "email": unique_email(),
+            "timezone": "America/Los_Angeles",
+        },
+    )
+    assert update_res.status_code == 200
+    updated = update_res.json()
+    assert updated["display_name"] == "Chef Helia"
+    assert updated["timezone"] == "America/Los_Angeles"
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_returns_new_valid_access_token(client: AsyncClient):
+    email = unique_email()
+    password = "testpassword123"
+
+    register_res = await client.post(
+        "/auth/register",
+        json={"email": email, "display_name": "Refresh Tester", "password": password},
+    )
+    assert register_res.status_code == 201
+
+    login_res = await client.post(
+        "/auth/login",
+        data={"username": email, "password": password},
+    )
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+
+    refresh_res = await client.post(
+        "/auth/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert refresh_res.status_code == 200
+    refreshed = refresh_res.json()
+    assert "access_token" in refreshed
+    assert refreshed["token_type"] == "bearer"
+
+    me_res = await client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {refreshed['access_token']}"},
+    )
+    assert me_res.status_code == 200
+    assert me_res.json()["email"] == email
+
+
+@pytest.mark.asyncio
+async def test_update_password_requires_current_password_and_enables_new_login(client: AsyncClient):
+    email = unique_email()
+    password = "testpassword123"
+    new_password = "newpassword456"
+
+    register_res = await client.post(
+        "/auth/register",
+        json={"email": email, "display_name": "Password Tester", "password": password},
+    )
+    assert register_res.status_code == 201
+
+    login_res = await client.post(
+        "/auth/login",
+        data={"username": email, "password": password},
+    )
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    update_res = await client.patch(
+        "/auth/me/password",
+        headers=headers,
+        json={"current_password": password, "new_password": new_password},
+    )
+    assert update_res.status_code == 204
+
+    old_login_res = await client.post(
+        "/auth/login",
+        data={"username": email, "password": password},
+    )
+    assert old_login_res.status_code == 401
+
+    new_login_res = await client.post(
+        "/auth/login",
+        data={"username": email, "password": new_password},
+    )
+    assert new_login_res.status_code == 200

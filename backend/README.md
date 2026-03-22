@@ -74,6 +74,8 @@ Upload and detection:
 - `DETECTION_PROVIDER`
 - `YOLO_MODEL_NAME`
 - `DETECTION_CONFIDENCE_THRESHOLD`
+- `YOLO_INFERENCE_SIZE`
+- `YOLO_MAX_IMAGE_DIM`
 
 Storage:
 
@@ -145,8 +147,8 @@ This separation is intentional:
 
 Retention note:
 - `IMAGE_RETENTION_DAYS` defines the intended retention policy
-- the app does not yet run an automatic cleanup job for expired images
-- bucket lifecycle rules can help on the storage side, but DB-side cleanup/orchestration is still future work
+- the backend now performs opportunistic cleanup for expired images when image routes are used
+- bucket lifecycle rules can still help on the storage side, but a dedicated background cleanup job is still future work
 
 ## Detection Modes
 
@@ -154,6 +156,7 @@ Retention note:
 
 - preferred local/demo detection provider
 - CPU inference path
+- downsizes oversized uploads before inference to keep phone photos more manageable
 - falls back to mock if inference or dependencies fail at runtime
 
 ### `mock`
@@ -167,6 +170,12 @@ Detection evaluation script:
 cd backend
 python scripts/eval_detection.py --images-dir /path/to/images --provider yolo --out-json ./eval_detection_report.json
 ```
+
+Latency tuning:
+
+- `YOLO_MAX_IMAGE_DIM` caps how large an uploaded image stays before YOLO sees it
+- `YOLO_INFERENCE_SIZE` controls the model prediction size passed into YOLO
+- lower values are usually faster on CPU, but can trade away some small-object accuracy
 
 ## Recipe Import
 
@@ -228,6 +237,6 @@ That isolation is intentional because recipe import and integration tests are de
 
 - no formal migration framework yet
 - no rate limiting yet
-- no background cleanup job for expired images yet
+- no dedicated background cleanup job for expired images yet
 - startup still uses auto-create rather than a formal production migration path
 - PostgreSQL deployment path is documented but not yet implemented in-repo

@@ -22,6 +22,7 @@ class InventoryItemUpdate(BaseModel):
     unit: Optional[str] = None
     category: Optional[str] = None
     is_perishable: Optional[bool] = None
+    refresh_created_at: Optional[bool] = None
 
 
 class InventoryItemRead(InventoryItemBase):

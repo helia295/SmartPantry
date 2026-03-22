@@ -5,6 +5,8 @@ from app.schemas.user import (
     UserLogin,
     Token,
     TokenPayload,
+    UserPasswordUpdate,
+    UserProfileUpdate,
     UserTimezoneUpdate,
 )
 from app.schemas.inventory import InventoryItemCreate, InventoryItemRead, InventoryItemUpdate
@@ -31,6 +33,12 @@ from app.schemas.recipe import (
     RecipeRecommendationListResponse,
     RecipeRecommendationRead,
     RecipeSummaryRead,
+    RecipeTagUpdateRead,
+    RecipeTagUpdateRequest,
+    RecipeCookApplyRead,
+    RecipeCookApplyRequest,
+    RecipeCookPreviewRead,
+    RecipeCookPreviewRequest,
 )
 
 __all__ = [
@@ -40,6 +48,8 @@ __all__ = [
     "UserLogin",
     "Token",
     "TokenPayload",
+    "UserProfileUpdate",
+    "UserPasswordUpdate",
     "UserTimezoneUpdate",
     "InventoryItemCreate",
     "InventoryItemRead",
@@ -64,4 +74,10 @@ __all__ = [
     "RecipeBookListResponse",
     "RecipeFeedbackRequest",
     "RecipeFeedbackRead",
+    "RecipeTagUpdateRequest",
+    "RecipeTagUpdateRead",
+    "RecipeCookPreviewRequest",
+    "RecipeCookPreviewRead",
+    "RecipeCookApplyRequest",
+    "RecipeCookApplyRead",
 ]
