@@ -66,6 +66,8 @@ def run_detection(image_bytes: bytes, original_filename: str) -> tuple[list[dict
             image_bytes=image_bytes,
             confidence_threshold=settings.detection_confidence_threshold,
             model_name=settings.yolo_model_name,
+            inference_size=settings.yolo_inference_size,
+            max_image_dim=settings.yolo_max_image_dim,
         )
         model_version = f"yolo-{settings.yolo_model_name}"
         if proposals:
@@ -83,19 +85,43 @@ def _load_yolo_model(model_name: str):
     return YOLO(model_name)
 
 
-def run_yolo_detection(image_bytes: bytes, confidence_threshold: float, model_name: str) -> list[dict]:
+def _open_image_for_detection(image_bytes: bytes):
     try:
         from PIL import Image
     except ImportError as exc:
         raise RuntimeError("Pillow is required for YOLO inference") from exc
 
+    return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+
+def _prepare_image_for_detection(image, max_image_dim: int):
+    if max_image_dim > 0:
+        image.thumbnail((max_image_dim, max_image_dim))
+    return image
+
+
+def run_yolo_detection(
+    image_bytes: bytes,
+    confidence_threshold: float,
+    model_name: str,
+    inference_size: int,
+    max_image_dim: int,
+) -> list[dict]:
+    image = _open_image_for_detection(image_bytes)
+    image = _prepare_image_for_detection(image, max_image_dim=max_image_dim)
+
     model = _load_yolo_model(model_name)
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     width, height = image.size
     if width <= 0 or height <= 0:
         return []
 
-    results = model.predict(source=image, conf=confidence_threshold, verbose=False, device="cpu")
+    results = model.predict(
+        source=image,
+        conf=confidence_threshold,
+        verbose=False,
+        device="cpu",
+        imgsz=inference_size,
+    )
     if not results:
         return []
 
@@ -150,7 +176,7 @@ def aggregate_auto_proposals(proposals: list[Any]) -> list[dict]:
     for proposal in proposals:
         source = getattr(proposal, "source", None) if not isinstance(proposal, dict) else proposal.get("source")
         state = getattr(proposal, "state", None) if not isinstance(proposal, dict) else proposal.get("state")
-        if source != "auto" or state == "rejected":
+        if source != "auto" or state != "pending":
             passthrough.append(_proposal_to_dict(proposal))
             continue
 
@@ -227,6 +253,8 @@ def detect_manual_region(
                 crop_h=box_h,
                 confidence_threshold=settings.detection_confidence_threshold,
                 model_name=settings.yolo_model_name,
+                inference_size=settings.yolo_inference_size,
+                max_image_dim=settings.yolo_max_image_dim,
             )
             if yolo_result is not None:
                 yolo_result["source"] = "manual"
@@ -251,10 +279,10 @@ def _detect_on_crop_with_yolo(
     crop_h: float,
     confidence_threshold: float,
     model_name: str,
+    inference_size: int,
+    max_image_dim: int,
 ) -> dict | None:
-    from PIL import Image
-
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    image = _open_image_for_detection(image_bytes)
     width, height = image.size
     if width <= 0 or height <= 0:
         return None
@@ -265,13 +293,16 @@ def _detect_on_crop_with_yolo(
     bottom = int(max(top + 1, min(height, round((crop_y + crop_h) * height))))
     cropped = image.crop((left, top, right, bottom))
 
+    cropped = _prepare_image_for_detection(cropped, max_image_dim=max_image_dim)
     buffer = io.BytesIO()
-    cropped.save(buffer, format="JPEG")
+    cropped.save(buffer, format="JPEG", quality=90, optimize=True)
     crop_bytes = buffer.getvalue()
     candidates = run_yolo_detection(
         image_bytes=crop_bytes,
         confidence_threshold=confidence_threshold,
         model_name=model_name,
+        inference_size=inference_size,
+        max_image_dim=max_image_dim,
     )
     if not candidates:
         return None

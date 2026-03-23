@@ -56,6 +56,12 @@ class Settings:
         self.max_upload_images: int = int(os.getenv("MAX_UPLOAD_IMAGES", "3"))
         self.max_image_size_mb: int = int(os.getenv("MAX_IMAGE_SIZE_MB", "5"))
         self.image_retention_days: int = int(os.getenv("IMAGE_RETENTION_DAYS", "7"))
+        self.image_cleanup_interval_minutes: int = int(
+            os.getenv("IMAGE_CLEANUP_INTERVAL_MINUTES", "30")
+        )
+        self.image_cleanup_batch_limit: int = int(
+            os.getenv("IMAGE_CLEANUP_BATCH_LIMIT", "200")
+        )
 
         # Detection provider configuration.
         # Prefer YOLO for local demos and only fall back to mock at runtime if
@@ -65,6 +71,8 @@ class Settings:
         self.detection_confidence_threshold: float = float(
             os.getenv("DETECTION_CONFIDENCE_THRESHOLD", "0.35")
         )
+        self.yolo_inference_size: int = int(os.getenv("YOLO_INFERENCE_SIZE", "960"))
+        self.yolo_max_image_dim: int = int(os.getenv("YOLO_MAX_IMAGE_DIM", "1600"))
 
         # Local storage path for development fallback.
         self.local_storage_dir: str = os.getenv("LOCAL_STORAGE_DIR", "./storage")

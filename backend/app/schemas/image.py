@@ -49,6 +49,9 @@ class ImageRead(BaseModel):
     created_at: datetime
     expires_at: datetime
     deleted_at: Optional[datetime] = None
+    detection_session_id: Optional[int] = None
+    detection_session_status: Optional[str] = None
+    pending_proposal_count: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -93,6 +96,7 @@ class DetectionConfirmAction(BaseModel):
     proposal_id: int
     action: Literal["add_new", "update_existing", "reject"]
     target_item_id: Optional[int] = None
+    apply_grouped_label: bool = False
     name: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None

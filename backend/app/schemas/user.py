@@ -9,11 +9,13 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
+    display_name: str
     password: str
 
 
 class UserRead(UserBase):
     id: int
+    display_name: str
     timezone: str
     created_at: datetime
 
@@ -37,3 +39,14 @@ class TokenPayload(BaseModel):
 
 class UserTimezoneUpdate(BaseModel):
     timezone: str
+
+
+class UserProfileUpdate(BaseModel):
+    display_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    timezone: Optional[str] = None
+
+
+class UserPasswordUpdate(BaseModel):
+    current_password: str
+    new_password: str

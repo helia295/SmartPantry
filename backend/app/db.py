@@ -79,6 +79,14 @@ def ensure_sqlite_schema_compatibility() -> None:
             user_columns = {
                 row[1] for row in conn.exec_driver_sql("PRAGMA table_info(users)").fetchall()
             }
+            if "display_name" not in user_columns:
+                conn.exec_driver_sql(
+                    "ALTER TABLE users ADD COLUMN display_name VARCHAR(80)"
+                )
+                conn.exec_driver_sql(
+                    "UPDATE users SET display_name = SUBSTR(email, 1, INSTR(email, '@') - 1) "
+                    "WHERE display_name IS NULL OR display_name = ''"
+                )
             if "timezone" not in user_columns:
                 conn.exec_driver_sql(
                     "ALTER TABLE users ADD COLUMN timezone VARCHAR(64) NOT NULL DEFAULT 'UTC'"

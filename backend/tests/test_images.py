@@ -1,5 +1,6 @@
 import shutil
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,8 @@ from httpx import ASGITransport, AsyncClient
 from app.core.config import get_settings
 from app.db import Base, SessionLocal, engine, ensure_sqlite_schema_compatibility
 from app.main import app
-from app.models import InventoryChangeLog
+from app.models import Image, InventoryChangeLog
+from app.services.images import cleanup_expired_images_with_own_session
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -58,9 +60,10 @@ def unique_email() -> str:
 async def register_and_login(client: AsyncClient) -> str:
     email = unique_email()
     password = "testpassword123"
+    display_name = "Image Tester"
     register_res = await client.post(
         "/auth/register",
-        json={"email": email, "password": password},
+        json={"email": email, "display_name": display_name, "password": password},
     )
     assert register_res.status_code == 201
 
@@ -139,6 +142,62 @@ async def test_list_images_returns_uploaded_items(client: AsyncClient):
     rows = list_res.json()["results"]
     assert len(rows) >= 1
     assert rows[0]["storage_key"].startswith("users/")
+    assert rows[0]["detection_session_id"] is not None
+    assert rows[0]["detection_session_status"] == "completed"
+    assert rows[0]["pending_proposal_count"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_list_images_cleans_up_expired_images(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    files = [("files", ("expired.jpg", b"abc123", "image/jpeg"))]
+
+    upload_res = await client.post("/images", headers=headers, files=files)
+    assert upload_res.status_code == 201
+    image_id = upload_res.json()["results"][0]["image"]["id"]
+
+    with SessionLocal() as db:
+        image = db.query(Image).filter(Image.id == image_id).first()
+        assert image is not None
+        image.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+        db.add(image)
+        db.commit()
+
+    list_res = await client.get("/images", headers=headers)
+    assert list_res.status_code == 200
+    assert all(row["id"] != image_id for row in list_res.json()["results"])
+
+    with SessionLocal() as db:
+        image = db.query(Image).filter(Image.id == image_id).first()
+        assert image is not None
+        assert image.deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_background_cleanup_helper_marks_expired_images_deleted(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    files = [("files", ("sweep.jpg", b"abc123", "image/jpeg"))]
+
+    upload_res = await client.post("/images", headers=headers, files=files)
+    assert upload_res.status_code == 201
+    image_id = upload_res.json()["results"][0]["image"]["id"]
+
+    with SessionLocal() as db:
+        image = db.query(Image).filter(Image.id == image_id).first()
+        assert image is not None
+        image.expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.add(image)
+        db.commit()
+
+    deleted_count = cleanup_expired_images_with_own_session(limit=10)
+    assert deleted_count >= 1
+
+    with SessionLocal() as db:
+        image = db.query(Image).filter(Image.id == image_id).first()
+        assert image is not None
+        assert image.deleted_at is not None
 
 
 @pytest.mark.asyncio
@@ -225,6 +284,88 @@ async def test_detection_view_grouped_aggregates_same_label(client: AsyncClient,
     assert boxes_res.status_code == 200
     boxes = boxes_res.json()["proposals"]
     assert len(boxes) == 2
+
+
+@pytest.mark.asyncio
+async def test_detection_view_grouped_preserves_reviewed_state(client: AsyncClient, monkeypatch):
+    def fake_run_detection(image_bytes: bytes, original_filename: str):
+        return (
+            [
+                {
+                    "label_raw": "orange",
+                    "label_normalized": "orange",
+                    "confidence": 0.7,
+                    "quantity_suggested": 1.0,
+                    "quantity_unit": "count",
+                    "category_suggested": "Produce",
+                    "is_perishable_suggested": True,
+                    "bbox_x": 0.1,
+                    "bbox_y": 0.1,
+                    "bbox_w": 0.2,
+                    "bbox_h": 0.2,
+                    "source": "auto",
+                    "state": "pending",
+                },
+                {
+                    "label_raw": "orange",
+                    "label_normalized": "orange",
+                    "confidence": 0.8,
+                    "quantity_suggested": 1.0,
+                    "quantity_unit": "count",
+                    "category_suggested": "Produce",
+                    "is_perishable_suggested": True,
+                    "bbox_x": 0.4,
+                    "bbox_y": 0.4,
+                    "bbox_w": 0.2,
+                    "bbox_h": 0.2,
+                    "source": "auto",
+                    "state": "pending",
+                },
+            ],
+            "yolo-test",
+        )
+
+    monkeypatch.setattr("app.api.images.run_detection", fake_run_detection)
+
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    files = [("files", ("fruit.jpg", b"abc123", "image/jpeg"))]
+
+    upload_res = await client.post("/images", headers=headers, files=files)
+    assert upload_res.status_code == 201
+    session_id = upload_res.json()["results"][0]["detection_session"]["id"]
+
+    grouped_res = await client.get(f"/detections/{session_id}?view=grouped", headers=headers)
+    assert grouped_res.status_code == 200
+    grouped = grouped_res.json()["proposals"]
+    assert len(grouped) == 1
+    proposal_id = grouped[0]["id"]
+
+    confirm_res = await client.post(
+        f"/detections/{session_id}/confirm",
+        headers=headers,
+        json={
+            "actions": [
+                {
+                    "proposal_id": proposal_id,
+                    "action": "add_new",
+                    "apply_grouped_label": True,
+                    "name": "orange",
+                    "quantity": 2,
+                    "unit": "count",
+                    "category": "Produce",
+                    "is_perishable": True,
+                }
+            ]
+        },
+    )
+    assert confirm_res.status_code == 200
+
+    refreshed_grouped_res = await client.get(f"/detections/{session_id}?view=grouped", headers=headers)
+    assert refreshed_grouped_res.status_code == 200
+    refreshed = refreshed_grouped_res.json()["proposals"]
+    assert len(refreshed) == 2
+    assert all(proposal["state"] != "pending" for proposal in refreshed)
 
 
 @pytest.mark.asyncio

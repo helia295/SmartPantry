@@ -29,6 +29,7 @@ class RecipeSummaryRead(BaseModel):
     servings: Optional[int] = None
     cuisine: Optional[str] = None
     dietary_tags: list[str] = []
+    favorite_tags: list[str] = []
     nutrition: dict[str, Any] = {}
     created_at: datetime
 
@@ -56,6 +57,7 @@ class RecipeRecommendationListResponse(BaseModel):
 
 
 class RecipeBookListResponse(BaseModel):
+    available_tags: list[str] = []
     results: list[RecipeSummaryRead]
 
 
@@ -66,3 +68,71 @@ class RecipeFeedbackRequest(BaseModel):
 class RecipeFeedbackRead(BaseModel):
     recipe_id: int
     feedback_type: Literal["like", "dislike"]
+
+
+class RecipeTagUpdateRequest(BaseModel):
+    tags: list[str]
+
+
+class RecipeTagUpdateRead(BaseModel):
+    recipe_id: int
+    tags: list[str]
+
+
+class RecipeCookPreviewRequest(BaseModel):
+    multiplier: float = 1.0
+
+
+class RecipeCookInventoryOptionRead(BaseModel):
+    id: int
+    name: str
+    normalized_name: str
+    quantity: float
+    unit: str
+    category: Optional[str] = None
+
+
+class RecipeCookPreviewItemRead(BaseModel):
+    ingredient_key: str
+    ingredient_raw: str
+    ingredient_normalized: str
+    quantity_text: Optional[str] = None
+    match_status: Literal["matched", "needs_review", "unmatched"] = "unmatched"
+    selected_inventory_item_id: Optional[int] = None
+    selected_inventory_item_name: Optional[str] = None
+    inventory_item_quantity: Optional[float] = None
+    inventory_item_unit: Optional[str] = None
+    reliable_quantity_match: bool = False
+    suggested_used_quantity: Optional[float] = None
+    suggested_remaining_quantity: Optional[float] = None
+    notes: list[str] = []
+
+
+class RecipeCookPreviewRead(BaseModel):
+    recipe_id: int
+    multiplier: float
+    inventory_options: list[RecipeCookInventoryOptionRead]
+    items: list[RecipeCookPreviewItemRead]
+
+
+class RecipeCookApplyItem(BaseModel):
+    ingredient_key: str
+    ingredient_raw: str
+    ingredient_normalized: str
+    inventory_item_id: Optional[int] = None
+    decision: Literal["ignore", "update", "remove"]
+    new_quantity: Optional[float] = None
+    new_unit: Optional[str] = None
+
+
+class RecipeCookApplyRequest(BaseModel):
+    multiplier: float = 1.0
+    actions: list[RecipeCookApplyItem]
+
+
+class RecipeCookApplyRead(BaseModel):
+    recipe_id: int
+    multiplier: float
+    updated: int
+    removed: int
+    ignored: int

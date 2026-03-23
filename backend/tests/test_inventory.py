@@ -27,10 +27,11 @@ def unique_email() -> str:
 async def register_and_login(client: AsyncClient) -> str:
     email = unique_email()
     password = "testpassword123"
+    display_name = "Inventory Tester"
 
     register_res = await client.post(
         "/auth/register",
-        json={"email": email, "password": password},
+        json={"email": email, "display_name": display_name, "password": password},
     )
     assert register_res.status_code == 201
 
@@ -69,13 +70,23 @@ async def test_inventory_crud_flow(client: AsyncClient):
     update_res = await client.patch(
         f"/inventory/{item_id}",
         headers=headers,
-        json={"quantity": 3, "unit": "cans", "name": "Black Beans Organic"},
+        json={
+            "quantity": 3,
+            "unit": "cans",
+            "name": "Black Beans Organic",
+            "category": "Pantry",
+            "is_perishable": True,
+            "refresh_created_at": True,
+        },
     )
     assert update_res.status_code == 200
     updated = update_res.json()
     assert updated["quantity"] == 3
     assert updated["unit"] == "cans"
     assert updated["normalized_name"] == "black beans organic"
+    assert updated["category"] == "Pantry"
+    assert updated["is_perishable"] is True
+    assert updated["created_at"] >= created["created_at"]
 
     delete_res = await client.delete(f"/inventory/{item_id}", headers=headers)
     assert delete_res.status_code == 204
