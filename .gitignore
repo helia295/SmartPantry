@@ -2,6 +2,7 @@
 node_modules/
 .next/
 out/
+.vercel/
 *.tsbuildinfo
 next-env.d.ts
 .venv/
@@ -28,7 +29,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
