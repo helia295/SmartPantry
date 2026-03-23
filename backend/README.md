@@ -51,6 +51,14 @@ Run locally:
 uvicorn app.main:app --reload --port 8000
 ```
 
+Build container locally:
+
+```bash
+cd backend
+docker build -t smartpantry-backend .
+docker run --rm -p 8000:8000 --env-file .env smartpantry-backend
+```
+
 Docs:
 
 - `http://localhost:8000/docs`
@@ -128,6 +136,20 @@ Production-oriented target:
 - explicit deployed frontend origins in `CORS_ORIGINS`
 - `STORAGE_PROVIDER=r2` or another object-storage-backed option
 
+Current recommended cloud deployment target:
+
+- Vercel for the frontend
+- AWS EC2 for the backend and YOLO inference
+- Neon for PostgreSQL
+- Cloudflare R2 for uploaded image storage
+
+Why EC2 for the backend:
+
+- keeps the current FastAPI + YOLO architecture mostly unchanged
+- gives more control over RAM/CPU than low-memory free PaaS offerings
+- supports a stronger conventional backend deployment story than a demo-oriented ML host
+- works well with a simple Docker-based deployment flow
+
 The backend emits warnings at startup when clearly unsafe production-like settings are still in use.
 
 ## Storage Modes
@@ -184,6 +206,11 @@ Latency tuning:
 - `YOLO_MAX_IMAGE_DIM` caps how large an uploaded image stays before YOLO sees it
 - `YOLO_INFERENCE_SIZE` controls the model prediction size passed into YOLO
 - lower values are usually faster on CPU, but can trade away some small-object accuracy
+
+Deployment note:
+
+- low-memory hosts such as small free-tier PaaS instances may still be too constrained for full YOLO inference
+- the current production direction is to run the backend on a host with more RAM rather than redesign the Smart Add flow immediately
 
 ## Recipe Import
 
