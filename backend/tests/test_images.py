@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.db import Base, SessionLocal, engine, ensure_sqlite_schema_compatibility
 from app.main import app
 from app.models import Image, InventoryChangeLog
+from app.services.images import cleanup_expired_images_with_own_session
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -166,6 +167,32 @@ async def test_list_images_cleans_up_expired_images(client: AsyncClient):
     list_res = await client.get("/images", headers=headers)
     assert list_res.status_code == 200
     assert all(row["id"] != image_id for row in list_res.json()["results"])
+
+    with SessionLocal() as db:
+        image = db.query(Image).filter(Image.id == image_id).first()
+        assert image is not None
+        assert image.deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_background_cleanup_helper_marks_expired_images_deleted(client: AsyncClient):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    files = [("files", ("sweep.jpg", b"abc123", "image/jpeg"))]
+
+    upload_res = await client.post("/images", headers=headers, files=files)
+    assert upload_res.status_code == 201
+    image_id = upload_res.json()["results"][0]["image"]["id"]
+
+    with SessionLocal() as db:
+        image = db.query(Image).filter(Image.id == image_id).first()
+        assert image is not None
+        image.expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.add(image)
+        db.commit()
+
+    deleted_count = cleanup_expired_images_with_own_session(limit=10)
+    assert deleted_count >= 1
 
     with SessionLocal() as db:
         image = db.query(Image).filter(Image.id == image_id).first()

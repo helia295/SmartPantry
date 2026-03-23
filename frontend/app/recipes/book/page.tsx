@@ -112,6 +112,12 @@ export default function SavedRecipesPage() {
     void loadSavedRecipes();
   }, [clearSessionToken, handleSessionExpired, token]);
 
+  useEffect(() => {
+    if (!message) return;
+    const timeoutId = window.setTimeout(() => setMessage(null), 4200);
+    return () => window.clearTimeout(timeoutId);
+  }, [message]);
+
   async function removeFavorite(recipeId: number) {
     if (!token) return;
     setError(null);

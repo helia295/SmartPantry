@@ -115,8 +115,10 @@ type FilePick = {
 type ReviewFrame = {
   image: ImageRecord;
   sessionId: number;
-  imageUrl: string;
-  proposals: DetectionProposal[];
+  imageUrl: string | null;
+  proposals: DetectionProposal[] | null;
+  loading: boolean;
+  error: string | null;
 };
 type ReviewMode = "grouped" | "boxes";
 type NoticeSection = "auth" | "inventory" | "camera" | "recipes";
@@ -344,38 +346,6 @@ function getProposalStateLabel(state: string): string {
   }
 }
 
-function findNextPendingPosition(
-  frames: ReviewFrame[],
-  startImageIndex: number,
-  startProposalIndex: number
-): { imageIndex: number; proposalIndex: number } | null {
-  if (frames.length === 0) return null;
-
-  for (let imageIndex = startImageIndex; imageIndex < frames.length; imageIndex += 1) {
-    const frame = frames[imageIndex];
-    const proposalStart = imageIndex === startImageIndex ? startProposalIndex + 1 : 0;
-    const proposalIndex = frame.proposals.findIndex(
-      (proposal, index) => index >= proposalStart && proposal.state === "pending"
-    );
-    if (proposalIndex >= 0) {
-      return { imageIndex, proposalIndex };
-    }
-  }
-
-  for (let imageIndex = 0; imageIndex <= startImageIndex; imageIndex += 1) {
-    const frame = frames[imageIndex];
-    const proposalLimit = imageIndex === startImageIndex ? startProposalIndex : frame.proposals.length;
-    const proposalIndex = frame.proposals.findIndex(
-      (proposal, index) => index < proposalLimit && proposal.state === "pending"
-    );
-    if (proposalIndex >= 0) {
-      return { imageIndex, proposalIndex };
-    }
-  }
-
-  return null;
-}
-
 export default function Home() {
   const [health, setHealth] = useState<Health>(null);
   const [error, setError] = useState<string | null>(null);
@@ -441,7 +411,7 @@ export default function Home() {
   const displayTimezone = user?.timezone || selectedTimezone;
 
   const activeFrame = reviewFrames[activeImageIndex] || null;
-  const activeProposal = activeFrame?.proposals[activeProposalIndex] || null;
+  const activeProposal = activeFrame?.proposals?.[activeProposalIndex] || null;
 
   const activeInventoryMatch = useMemo(() => {
     if (!activeProposal) return null;
@@ -488,6 +458,22 @@ export default function Home() {
   });
 
   useEffect(() => {
+    if (!notice || notice.tone === "error") return;
+    const timeoutId = window.setTimeout(() => {
+      setNotice((current) =>
+        current &&
+        current.section === notice.section &&
+        current.tone === notice.tone &&
+        current.text === notice.text
+          ? null
+          : current
+      );
+    }, 4200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [notice]);
+
+  useEffect(() => {
     fetch(`${API_BASE}/health`)
       .then((r) => r.json())
       .then(setHealth)
@@ -515,7 +501,7 @@ export default function Home() {
     return () => {
       pickedFiles.forEach((f) => URL.revokeObjectURL(f.previewUrl));
       reviewFrames.forEach((f) => {
-        if (f.imageUrl.startsWith("blob:")) URL.revokeObjectURL(f.imageUrl);
+        if (f.imageUrl?.startsWith("blob:")) URL.revokeObjectURL(f.imageUrl);
       });
     };
   }, []);
@@ -572,7 +558,7 @@ export default function Home() {
 
   const perishableCount = inventory.filter((item) => item.is_perishable).length;
   const pendingProposalCount = reviewFrames.reduce(
-    (count, frame) => count + frame.proposals.filter((proposal) => proposal.state === "pending").length,
+    (count, frame) => count + (frame.image.pending_proposal_count ?? frame.proposals?.filter((proposal) => proposal.state === "pending").length ?? 0),
     0
   );
 
@@ -935,11 +921,59 @@ export default function Home() {
     return URL.createObjectURL(blob);
   }
 
+  async function hydrateReviewThumbnail(frameIndex: number, framesOverride?: ReviewFrame[]) {
+    const sourceFrames = framesOverride ?? reviewFrames;
+    const frame = sourceFrames[frameIndex];
+    if (!frame || frame.imageUrl) return;
+
+    try {
+      const imageUrl = await fetchImageObjectUrl(frame.image.id);
+      setReviewFrames((prev) =>
+        prev.map((candidate, index) => {
+          if (index !== frameIndex || candidate.imageUrl) return candidate;
+          return { ...candidate, imageUrl };
+        })
+      );
+    } catch {
+      // Keep the lightweight placeholder if the thumbnail cannot be loaded.
+    }
+  }
+
+  function revokeFrameImage(frame: ReviewFrame) {
+    if (frame.imageUrl?.startsWith("blob:")) {
+      URL.revokeObjectURL(frame.imageUrl);
+    }
+  }
+
+  function mergeReviewFrames(rows: ImageRecord[], previousFrames: ReviewFrame[]): ReviewFrame[] {
+    const previousById = new Map(previousFrames.map((frame) => [frame.image.id, frame]));
+    return rows.map((row) => {
+      const existing = previousById.get(row.id);
+      if (!existing) {
+        return {
+          image: row,
+          sessionId: row.detection_session_id as number,
+          imageUrl: null,
+          proposals: null,
+          loading: false,
+          error: null,
+        };
+      }
+
+      return {
+        ...existing,
+        image: row,
+        sessionId: row.detection_session_id as number,
+      };
+    });
+  }
+
   function replaceReviewFrames(nextFrames: ReviewFrame[]) {
     setReviewFrames((prev) => {
+      const nextIds = new Set(nextFrames.map((frame) => frame.image.id));
       prev.forEach((frame) => {
-        if (frame.imageUrl.startsWith("blob:")) {
-          URL.revokeObjectURL(frame.imageUrl);
+        if (!nextIds.has(frame.image.id)) {
+          revokeFrameImage(frame);
         }
       });
       return nextFrames;
@@ -962,16 +996,75 @@ export default function Home() {
     return detail.proposals;
   }
 
-  function openReviewFrame(frameIndex: number) {
-    const frame = reviewFrames[frameIndex];
-    if (!frame) return;
+  async function hydrateReviewFrame(
+    frameIndex: number,
+    framesOverride?: ReviewFrame[]
+  ): Promise<ReviewFrame | null> {
+    const sourceFrames = framesOverride ?? reviewFrames;
+    const frame = sourceFrames[frameIndex];
+    if (!frame) return null;
+    if (frame.imageUrl && frame.proposals) return frame;
+
+    setReviewFrames((prev) =>
+      prev.map((candidate, index) =>
+        index === frameIndex ? { ...candidate, loading: true, error: null } : candidate
+      )
+    );
+
+    try {
+      const [imageUrl, proposals] = await Promise.all([
+        fetchImageObjectUrl(frame.image.id),
+        fetchDetectionProposals(frame.sessionId, reviewMode),
+      ]);
+      const hydrated: ReviewFrame = {
+        ...frame,
+        imageUrl,
+        proposals,
+        loading: false,
+        error: null,
+        image: {
+          ...frame.image,
+          pending_proposal_count: proposals.filter((proposal) => proposal.state === "pending").length,
+        },
+      };
+
+      setReviewFrames((prev) =>
+        prev.map((candidate, index) => {
+          if (index !== frameIndex) return candidate;
+          if (candidate.imageUrl && candidate.imageUrl !== imageUrl) {
+            revokeFrameImage(candidate);
+          }
+          return hydrated;
+        })
+      );
+      return hydrated;
+    } catch (e) {
+      const errorMessage =
+        e instanceof Error ? e.message : `Recent upload ${frame.image.original_filename} could not be loaded`;
+      setReviewFrames((prev) =>
+        prev.map((candidate, index) =>
+          index === frameIndex ? { ...candidate, loading: false, error: errorMessage } : candidate
+        )
+      );
+      showNotice("camera", "error", errorMessage);
+      return null;
+    }
+  }
+
+  async function openReviewFrame(frameIndex: number, framesOverride?: ReviewFrame[]) {
+    const hydrated = await hydrateReviewFrame(frameIndex, framesOverride);
+    if (!hydrated) return;
     setActiveImageIndex(frameIndex);
-    const nextPendingIndex = frame.proposals.findIndex((proposal) => proposal.state === "pending");
+    const nextPendingIndex = hydrated.proposals?.findIndex((proposal) => proposal.state === "pending") ?? -1;
     setActiveProposalIndex(nextPendingIndex >= 0 ? nextPendingIndex : 0);
     setCameraWorkspaceOpen(true);
   }
 
-  async function loadRecentUploads(openWorkspace = false, preferredImageIds: number[] = []) {
+  async function loadRecentUploads(
+    openWorkspace = false,
+    preferredImageIds: number[] = [],
+    existingFramesOverride?: ReviewFrame[]
+  ) {
     if (!token) return;
 
     const res = await fetch(`${API_BASE}/images`, { headers: authHeaders() });
@@ -981,18 +1074,14 @@ export default function Home() {
     }
 
     const payload = (await res.json()) as { results: ImageRecord[] };
-    const rows = payload.results.filter((row) => row.detection_session_id).slice(0, 8);
-    const frames = await Promise.all(
-      rows.map(async (row) => ({
-        image: row,
-        sessionId: row.detection_session_id as number,
-        imageUrl: await fetchImageObjectUrl(row.id),
-        proposals: await fetchDetectionProposals(row.detection_session_id as number, reviewMode),
-      }))
-    );
-
-    const currentImageId = reviewFrames[activeImageIndex]?.image.id;
+    const rows = payload.results.filter((row) => row.detection_session_id).slice(0, 10);
+    const sourceFrames = existingFramesOverride ?? reviewFrames;
+    const currentImageId = sourceFrames[activeImageIndex]?.image.id;
+    const frames = mergeReviewFrames(rows, sourceFrames);
     replaceReviewFrames(frames);
+    frames.forEach((_, index) => {
+      void hydrateReviewThumbnail(index, frames);
+    });
 
     if (frames.length === 0) {
       setCameraWorkspaceOpen(false);
@@ -1006,7 +1095,8 @@ export default function Home() {
         ? frames.findIndex(
             (frame) =>
               preferredImageIds.includes(frame.image.id) &&
-              frame.proposals.some((proposal) => proposal.state === "pending")
+              (frame.proposals?.some((proposal) => proposal.state === "pending") ??
+                (frame.image.pending_proposal_count ?? 0) > 0)
           )
         : -1;
     const preferredFallbackIndex =
@@ -1026,9 +1116,14 @@ export default function Home() {
             ? preservedIndex
             : 0;
     setActiveImageIndex(nextIndex);
-    const nextPendingIndex = frames[nextIndex].proposals.findIndex((proposal) => proposal.state === "pending");
+    const loadedProposals = frames[nextIndex].proposals;
+    const nextPendingIndex = loadedProposals?.findIndex((proposal) => proposal.state === "pending") ?? -1;
     setActiveProposalIndex(nextPendingIndex >= 0 ? nextPendingIndex : 0);
-    setCameraWorkspaceOpen(openWorkspace);
+    if (openWorkspace) {
+      await openReviewFrame(nextIndex, frames);
+    } else {
+      setCameraWorkspaceOpen(false);
+    }
   }
 
   async function uploadAndAnalyze() {
@@ -1073,7 +1168,8 @@ export default function Home() {
       });
       await loadRecentUploads(
         true,
-        uploadPayload.results.map((row) => row.image.id)
+        uploadPayload.results.map((row) => row.image.id),
+        []
       );
       showNotice("camera", "success", "Detection ready. Review each proposal before saving anything.");
       cameraSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1090,10 +1186,17 @@ export default function Home() {
     setReviewFrames((prev) =>
       prev.map((frame, frameIndex) => {
         if (frameIndex !== activeImageIndex) return frame;
-        const proposals = frame.proposals.map((proposal, proposalIndex) =>
+        const proposals = (frame.proposals ?? []).map((proposal, proposalIndex) =>
           proposalIndex === activeProposalIndex ? { ...proposal, ...patch } : proposal
         );
-        return { ...frame, proposals };
+        return {
+          ...frame,
+          proposals,
+          image: {
+            ...frame.image,
+            pending_proposal_count: proposals.filter((proposal) => proposal.state === "pending").length,
+          },
+        };
       })
     );
   }
@@ -1122,26 +1225,47 @@ export default function Home() {
     setReviewFrames((prev) => {
       nextFrames = prev.map((frame, frameIndex) => {
         if (frameIndex !== activeImageIndex) return frame;
-        const proposals = frame.proposals.map((proposal, proposalIndex) =>
+        const proposals = (frame.proposals ?? []).map((proposal, proposalIndex) =>
           proposalIndex === activeProposalIndex ? { ...proposal, state: nextState } : proposal
         );
-        return { ...frame, proposals };
+        return {
+          ...frame,
+          proposals,
+          image: {
+            ...frame.image,
+            pending_proposal_count: proposals.filter((proposal) => proposal.state === "pending").length,
+          },
+        };
       });
       return nextFrames;
     });
     return nextFrames;
   }
 
-  function moveToNextProposal(framesOverride: ReviewFrame[] = reviewFrames) {
-    const nextPosition = findNextPendingPosition(framesOverride, activeImageIndex, activeProposalIndex);
-    if (!nextPosition) {
-      setCameraWorkspaceOpen(false);
-      showNotice("camera", "success", "Review complete for the current uploads.");
+  async function moveToNextProposal(framesOverride: ReviewFrame[] = reviewFrames) {
+    const currentFrame = framesOverride[activeImageIndex];
+    const currentProposals = currentFrame?.proposals ?? [];
+    const nextInCurrentIndex = currentProposals.findIndex(
+      (proposal, index) => index > activeProposalIndex && proposal.state === "pending"
+    );
+    if (nextInCurrentIndex >= 0) {
+      setActiveProposalIndex(nextInCurrentIndex);
       return;
     }
 
-    setActiveImageIndex(nextPosition.imageIndex);
-    setActiveProposalIndex(nextPosition.proposalIndex);
+    for (let offset = 1; offset <= framesOverride.length; offset += 1) {
+      const frameIndex = (activeImageIndex + offset) % framesOverride.length;
+      const frame = framesOverride[frameIndex];
+      if ((frame.image.pending_proposal_count ?? 0) > 0) {
+        await openReviewFrame(frameIndex, framesOverride);
+        return;
+      }
+    }
+
+    if (framesOverride.every((frame) => (frame.image.pending_proposal_count ?? 0) <= 0)) {
+      setCameraWorkspaceOpen(false);
+      showNotice("camera", "success", "Review complete for the current uploads.");
+    }
   }
 
   async function confirmActiveProposal(
@@ -1175,7 +1299,7 @@ export default function Home() {
     const nextState =
       action === "reject" ? "skipped" : action === "update_existing" ? "updated" : "added";
     const nextFrames = markActiveProposalState(nextState);
-    moveToNextProposal(nextFrames);
+    await moveToNextProposal(nextFrames);
     return true;
   }
 
@@ -1244,11 +1368,20 @@ export default function Home() {
     const proposal = (await res.json()) as DetectionProposal;
 
     setReviewFrames((prev) =>
-      prev.map((frame, idx) =>
-        idx === activeImageIndex ? { ...frame, proposals: [...frame.proposals, proposal] } : frame
-      )
+      prev.map((frame, idx) => {
+        if (idx !== activeImageIndex) return frame;
+        const proposals = [...(frame.proposals ?? []), proposal];
+        return {
+          ...frame,
+          proposals,
+          image: {
+            ...frame.image,
+            pending_proposal_count: proposals.filter((candidate) => candidate.state === "pending").length,
+          },
+        };
+      })
     );
-    setActiveProposalIndex(activeFrame.proposals.length);
+    setActiveProposalIndex(activeFrame.proposals?.length ?? 0);
     setManualPointMode(false);
     setPendingManualPoint(null);
     setManualLabelHint("");
@@ -1260,10 +1393,20 @@ export default function Home() {
     if (reviewFrames.length === 0) return;
     try {
       const refreshed = await Promise.all(
-        reviewFrames.map(async (frame) => ({
-          ...frame,
-          proposals: await fetchDetectionProposals(frame.sessionId, mode),
-        }))
+        reviewFrames.map(async (frame) => {
+          if (!frame.proposals) {
+            return frame;
+          }
+          const proposals = await fetchDetectionProposals(frame.sessionId, mode);
+          return {
+            ...frame,
+            proposals,
+            image: {
+              ...frame.image,
+              pending_proposal_count: proposals.filter((proposal) => proposal.state === "pending").length,
+            },
+          };
+        })
       );
       setReviewFrames(refreshed);
       setActiveProposalIndex(0);
@@ -1418,6 +1561,7 @@ export default function Home() {
   }
 
   const activeBox =
+    !manualPointMode &&
     activeImageBounds &&
     activeProposal &&
     activeProposal.bbox_x !== null &&
@@ -1429,6 +1573,16 @@ export default function Home() {
           top: `${(activeImageBounds?.top || 0) + Math.max(0, activeProposal.bbox_y || 0) * (activeImageBounds?.height || 0)}px`,
           width: `${Math.min(1, activeProposal.bbox_w || 0) * (activeImageBounds?.width || 0)}px`,
           height: `${Math.min(1, activeProposal.bbox_h || 0) * (activeImageBounds?.height || 0)}px`,
+        }
+      : null;
+
+  const manualPointMarker =
+    manualPointMode &&
+    pendingManualPoint &&
+    activeImageBounds
+      ? {
+          left: `${(activeImageBounds.left || 0) + pendingManualPoint.x * (activeImageBounds.width || 0)}px`,
+          top: `${(activeImageBounds.top || 0) + pendingManualPoint.y * (activeImageBounds.height || 0)}px`,
         }
       : null;
 
@@ -1926,14 +2080,20 @@ export default function Home() {
               {reviewFrames.length > 0 ? (
                 <div className="review-thumb-strip review-thumb-grid">
                   {reviewFrames.map((frame, frameIndex) => {
-                    const pendingCount = frame.proposals.filter((proposal) => proposal.state === "pending").length;
+                    const pendingCount = frame.image.pending_proposal_count ?? 0;
                     return (
                       <button
                         key={frame.image.id}
                         className={`review-thumb ${frameIndex === activeImageIndex && cameraWorkspaceOpen ? "review-thumb-active" : ""}`}
-                        onClick={() => openReviewFrame(frameIndex)}
+                        onClick={() => void openReviewFrame(frameIndex)}
                       >
-                        <img src={frame.imageUrl} alt={frame.image.original_filename} />
+                        {frame.imageUrl ? (
+                          <img src={frame.imageUrl} alt={frame.image.original_filename} />
+                        ) : (
+                          <div className="review-thumb-placeholder">
+                            <span aria-hidden="true">🖼️</span>
+                          </div>
+                        )}
                         <div>
                           <strong>Photo {frameIndex + 1}</strong>
                           <p>{pendingCount} pending</p>
@@ -1950,7 +2110,15 @@ export default function Home() {
               )}
             </div>
 
-            {cameraWorkspaceOpen && activeFrame ? (
+            {cameraWorkspaceOpen && activeFrame?.loading ? (
+              <div className="review-collapsed-note">
+                <p className="muted-text">Opening that upload and loading its review details…</p>
+              </div>
+            ) : cameraWorkspaceOpen && activeFrame?.error ? (
+              <div className="review-collapsed-note">
+                <p className="error">{activeFrame.error}</p>
+              </div>
+            ) : cameraWorkspaceOpen && activeFrame && activeFrame.imageUrl && activeFrame.proposals ? (
               <div className="review-workspace">
                 <div className="review-sidebar">
                   <div className="review-sidebar-card">
@@ -1968,6 +2136,23 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
+                  <div className="review-sidebar-card review-complete-card">
+                    <p className="tiny-text">
+                      Finished reviewing this upload set? Collapse the workspace and keep Recent Uploads only.
+                    </p>
+                    <button
+                      className="secondary-button"
+                      onClick={() => {
+                        clearNotice("camera");
+                        setCameraWorkspaceOpen(false);
+                        setManualPointMode(false);
+                        setPendingManualPoint(null);
+                        setManualLabelHint("");
+                      }}
+                    >
+                      Done reviewing
+                    </button>
+                  </div>
                 </div>
 
                 <div className="review-stage-panel">
@@ -1980,6 +2165,7 @@ export default function Home() {
                       onClick={(e) => void handleImageClick(e)}
                     />
                     {activeBox && <div className="bbox" style={activeBox} />}
+                    {manualPointMarker && <div className="manual-point-marker" style={manualPointMarker} />}
                   </div>
                   <div className="review-stage-caption">
                     <p className="tiny-text">
@@ -1988,6 +2174,11 @@ export default function Home() {
                     {manualPointMode && (
                       <p className="tiny-text">
                         Tap the photo where the missing item appears, then add a quick hint below.
+                      </p>
+                    )}
+                    {!manualPointMode && activeFrame.image.pending_proposal_count === 0 && (
+                      <p className="tiny-text">
+                        Finished with this upload? Use <strong>Done reviewing</strong> to collapse the workspace.
                       </p>
                     )}
                   </div>

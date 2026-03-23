@@ -160,6 +160,12 @@ export default function RecipeDetailPage() {
     void loadRecipe();
   }, [clearSessionToken, handleSessionExpired, params?.id, token]);
 
+  useEffect(() => {
+    if (!cookMessage) return;
+    const timeoutId = window.setTimeout(() => setCookMessage(null), 4800);
+    return () => window.clearTimeout(timeoutId);
+  }, [cookMessage]);
+
   async function submitFeedback(feedbackType: "like" | "dislike") {
     if (!token || !recipe) return;
     if (feedbackType === "like" && recipe.current_feedback === "like") {

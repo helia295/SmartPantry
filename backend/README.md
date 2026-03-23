@@ -1,17 +1,19 @@
 # SmartPantry API
 
-FastAPI backend for SmartPantry. The backend owns authentication, inventory state, image upload and detection workflows, recipe recommendation APIs, and storage abstraction.
+FastAPI backend for SmartPantry. The backend owns authentication, inventory state, image upload and review workflows, recipe recommendation APIs, storage abstraction, and scheduled retention cleanup for uploaded images.
 
 For the higher-level product overview, see the repo root [README](../README.md).
 
 ## Backend Responsibilities
 
-- user registration, login, and identity lookup
+- user registration, login, token refresh, and identity lookup
+- account profile, password, and timezone updates
 - inventory CRUD and change logs
 - image upload, image metadata, and image content retrieval
 - detection session persistence and proposal review support
-- recipe import, recommendation ranking, feedback, and saved recipe book APIs
+- recipe import, recommendation ranking, feedback, favorites, hashtagging, and pantry follow-through APIs
 - storage abstraction for local filesystem and Cloudflare R2
+- scheduled cleanup of expired uploaded images
 
 ## App Structure
 
@@ -22,7 +24,7 @@ backend/
 │   ├── core/        config and security
 │   ├── models/      SQLAlchemy models
 │   ├── schemas/     Pydantic schemas
-│   ├── services/    storage, detection, recipe logic
+│   ├── services/    storage, detection, image retention, recipe logic
 │   ├── db.py        engine/session setup
 │   └── main.py      app startup and router wiring
 ├── scripts/         import and evaluation scripts
@@ -71,6 +73,8 @@ Upload and detection:
 - `MAX_UPLOAD_IMAGES`
 - `MAX_IMAGE_SIZE_MB`
 - `IMAGE_RETENTION_DAYS`
+- `IMAGE_CLEANUP_INTERVAL_MINUTES`
+- `IMAGE_CLEANUP_BATCH_LIMIT`
 - `DETECTION_PROVIDER`
 - `YOLO_MODEL_NAME`
 - `DETECTION_CONFIDENCE_THRESHOLD`
@@ -109,6 +113,7 @@ The backend currently creates tables automatically on startup for MVP simplicity
 Current local-development defaults are intentionally easy to run, but they are not the intended production posture.
 
 Development-friendly defaults:
+
 - `APP_ENV=development`
 - SQLite
 - local storage
@@ -116,13 +121,14 @@ Development-friendly defaults:
 - localhost CORS defaults
 
 Production-oriented target:
+
 - `APP_ENV=production`
 - PostgreSQL
 - strong `JWT_SECRET`
 - explicit deployed frontend origins in `CORS_ORIGINS`
 - `STORAGE_PROVIDER=r2` or another object-storage-backed option
 
-The backend now emits warnings at startup when clearly unsafe production-like settings are still in use.
+The backend emits warnings at startup when clearly unsafe production-like settings are still in use.
 
 ## Storage Modes
 
@@ -138,17 +144,19 @@ Good for development:
 Supported for deployment-oriented storage:
 
 - image bytes are stored in R2
-- structured metadata still stays in the database
+- structured metadata stays in the database
 
 This separation is intentional:
 
-- object storage is for blobs/files
+- object storage is for blobs and files
 - the database is for structured relational state
 
 Retention note:
+
 - `IMAGE_RETENTION_DAYS` defines the intended retention policy
-- the backend now performs opportunistic cleanup for expired images when image routes are used
-- bucket lifecycle rules can still help on the storage side, but a dedicated background cleanup job is still future work
+- the backend performs a startup sweep and recurring background cleanup for expired images
+- image routes still run opportunistic cleanup as a second line of defense
+- bucket lifecycle rules can still help on the storage side, especially for Cloudflare R2 deployments
 
 ## Detection Modes
 
@@ -161,7 +169,7 @@ Retention note:
 
 ### `mock`
 
-- deterministic development/CI fallback
+- deterministic development and CI fallback
 - useful when ML dependencies are unavailable
 
 Detection evaluation script:
@@ -203,19 +211,25 @@ What the importer does:
 
 ## Recipe API Surface
 
-Current recipe routes:
+Current recipe routes include:
 
 - `GET /recipes/recommendations`
 - `GET /recipes/{id}`
 - `POST /recipes/{id}/feedback`
+- `DELETE /recipes/{id}/feedback`
 - `GET /recipes/book`
+- `PUT /recipes/{id}/tags`
+- `POST /recipes/{id}/cook-preview`
+- `POST /recipes/{id}/cook-apply`
 
 Current behavior:
 
 - recommendations are ranked against confirmed inventory
-- main ingredients (if user inputed) are prioritized ahead of other inventory-only matches
+- main ingredients are prioritized ahead of other inventory-only matches
 - dislikes are excluded from future recommendation pages
-- likes are saved to the recipe book
+- likes are saved to the favorite recipe book
+- hashtags are optional organization metadata inside the recipe book
+- pantry follow-through is conservative and requires explicit user review before inventory changes are applied
 
 ## Testing
 
@@ -237,6 +251,6 @@ That isolation is intentional because recipe import and integration tests are de
 
 - no formal migration framework yet
 - no rate limiting yet
-- no dedicated background cleanup job for expired images yet
 - startup still uses auto-create rather than a formal production migration path
 - PostgreSQL deployment path is documented but not yet implemented in-repo
+- detection still runs inline rather than via a dedicated background worker

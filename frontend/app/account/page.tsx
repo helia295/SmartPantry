@@ -106,6 +106,12 @@ export default function AccountPage() {
     void loadProfile();
   }, [clearSessionToken, handleSessionExpired, token]);
 
+  useEffect(() => {
+    if (!message) return;
+    const timeoutId = window.setTimeout(() => setMessage(null), 4200);
+    return () => window.clearTimeout(timeoutId);
+  }, [message]);
+
   async function saveProfile() {
     if (!token) return;
     setMessage(null);

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.db import SessionLocal
 from app.models import Image
 from app.services.storage import get_storage_service
 
@@ -35,3 +36,11 @@ def cleanup_expired_images(db: Session, *, limit: int = 200) -> int:
 
     db.commit()
     return len(expired_images)
+
+
+def cleanup_expired_images_with_own_session(*, limit: int = 200) -> int:
+    db = SessionLocal()
+    try:
+        return cleanup_expired_images(db, limit=limit)
+    finally:
+        db.close()
