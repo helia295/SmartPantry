@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, detections, health, images, inventory, recipes
 from app.core.config import get_settings
 from app.db import Base, engine, ensure_sqlite_schema_compatibility
+from app.services.detection import preload_detection_backend
 from app.services.images import cleanup_expired_images_with_own_session
 
 
@@ -46,6 +47,10 @@ async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_sqlite_schema_compatibility()
     cleanup_expired_images_with_own_session(limit=settings.image_cleanup_batch_limit)
+    try:
+        await asyncio.to_thread(preload_detection_backend)
+    except Exception:
+        logger.exception("Detection backend warmup failed; first detection request may be slower.")
 
     stop_event = asyncio.Event()
     worker_task: asyncio.Task[None] | None = None

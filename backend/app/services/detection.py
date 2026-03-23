@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -80,9 +81,20 @@ def run_detection(image_bytes: bytes, original_filename: str) -> tuple[list[dict
 
 @lru_cache(maxsize=2)
 def _load_yolo_model(model_name: str):
+    os.environ.setdefault("YOLO_CONFIG_DIR", "/tmp/Ultralytics")
     from ultralytics import YOLO
 
     return YOLO(model_name)
+
+
+def preload_detection_backend() -> None:
+    settings = get_settings()
+    provider = settings.detection_provider.strip().lower()
+    if provider != "yolo":
+        return
+
+    logger.info("Preloading YOLO model '%s' for detection warmup.", settings.yolo_model_name)
+    _load_yolo_model(settings.yolo_model_name)
 
 
 def _open_image_for_detection(image_bytes: bytes):

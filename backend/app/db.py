@@ -15,13 +15,17 @@ class Base(DeclarativeBase):
 
 
 def build_engine(database_url: str):
+    engine_kwargs = {}
+    if database_url.startswith("sqlite"):
+        engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+    else:
+        # Keep managed Postgres connections healthier across idle periods on hosted platforms.
+        engine_kwargs["pool_pre_ping"] = True
+        engine_kwargs["pool_recycle"] = 300
+
     return create_engine(
         database_url,
-        connect_args=(
-            {"check_same_thread": False, "timeout": 30}
-            if database_url.startswith("sqlite")
-            else {}
-        ),
+        **engine_kwargs,
     )
 
 
