@@ -2,11 +2,13 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api import auth, detections, health, images, inventory, recipes
 from app.core.config import get_settings
+from app.core.rate_limit import InMemoryRateLimiter
 from app.db import Base, engine, ensure_sqlite_schema_compatibility
 from app.services.detection import preload_detection_backend
 from app.services.images import cleanup_expired_images_with_own_session
@@ -80,6 +82,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    app.state.rate_limiter = InMemoryRateLimiter(settings)
 
     app.add_middleware(
         CORSMiddleware,
@@ -88,6 +91,21 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def rate_limit_middleware(request: Request, call_next):
+        limiter = app.state.rate_limiter
+        limit_result = limiter.check(request)
+        if limit_result is not None:
+            rule, retry_after = limit_result
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": f"Rate limit exceeded for {rule.name}. Please try again later."
+                },
+                headers={"Retry-After": str(retry_after)},
+            )
+        return await call_next(request)
 
     app.include_router(health.router, prefix="/health", tags=["health"])
     app.include_router(auth.router, prefix="/auth", tags=["auth"])

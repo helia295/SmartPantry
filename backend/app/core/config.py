@@ -74,6 +74,27 @@ class Settings:
         self.yolo_inference_size: int = int(os.getenv("YOLO_INFERENCE_SIZE", "960"))
         self.yolo_max_image_dim: int = int(os.getenv("YOLO_MAX_IMAGE_DIM", "1600"))
 
+        # Lightweight in-memory rate limiting.
+        # This is intended as a practical deployment safeguard for a single-instance app.
+        self.auth_rate_limit_requests: int = int(
+            os.getenv("AUTH_RATE_LIMIT_REQUESTS", "10")
+        )
+        self.auth_rate_limit_window_seconds: int = int(
+            os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "60")
+        )
+        self.register_rate_limit_requests: int = int(
+            os.getenv("REGISTER_RATE_LIMIT_REQUESTS", "5")
+        )
+        self.register_rate_limit_window_seconds: int = int(
+            os.getenv("REGISTER_RATE_LIMIT_WINDOW_SECONDS", "300")
+        )
+        self.image_upload_rate_limit_requests: int = int(
+            os.getenv("IMAGE_UPLOAD_RATE_LIMIT_REQUESTS", "12")
+        )
+        self.image_upload_rate_limit_window_seconds: int = int(
+            os.getenv("IMAGE_UPLOAD_RATE_LIMIT_WINDOW_SECONDS", "300")
+        )
+
         # Local storage path for development fallback.
         self.local_storage_dir: str = os.getenv("LOCAL_STORAGE_DIR", "./storage")
 

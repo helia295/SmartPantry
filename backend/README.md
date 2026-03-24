@@ -2,20 +2,20 @@
 
 FastAPI backend for SmartPantry. The backend owns authentication, inventory state, image upload and review workflows, recipe recommendation APIs, storage abstraction, and scheduled retention cleanup for uploaded images.
 
-For the higher-level product overview, see the repo root [README](../README.md).
+For the product-level overview, see the repo root [README](../README.md).
 
-## Backend Responsibilities
+## Responsibilities
 
-- user registration, login, token refresh, and identity lookup
-- account profile, password, and timezone updates
+- registration, login, token refresh, and identity lookup
+- profile, password, and timezone updates
 - inventory CRUD and change logs
 - image upload, image metadata, and image content retrieval
 - detection session persistence and proposal review support
-- recipe import, recommendation ranking, feedback, favorites, hashtagging, and pantry follow-through APIs
+- recipe import, recommendation ranking, feedback, favorites, hashtags, and pantry follow-through APIs
 - storage abstraction for local filesystem and Cloudflare R2
-- scheduled cleanup of expired uploaded images
+- startup and recurring cleanup of expired uploaded images
 
-## App Structure
+## Backend Structure
 
 ```text
 backend/
@@ -31,12 +31,14 @@ backend/
 └── tests/           isolated backend tests
 ```
 
-## Requirements
+## Local Setup
+
+Requirements:
 
 - Python `>=3.10`
 - virtualenv recommended
 
-Setup:
+Install:
 
 ```bash
 cd backend
@@ -51,30 +53,37 @@ Run locally:
 uvicorn app.main:app --reload --port 8000
 ```
 
-Build container locally:
+OpenAPI docs:
+
+- `http://localhost:8000/docs`
+
+## Docker
+
+Build locally:
 
 ```bash
 cd backend
 docker build -t smartpantry-backend .
+```
+
+Run locally:
+
+```bash
 docker run --rm -p 8000:8000 --env-file .env smartpantry-backend
 ```
 
-Docs:
-
-- `http://localhost:8000/docs`
-
 ## Environment Variables
 
-Most backend settings are read from `backend/.env` or exported shell variables.
+Most backend settings are loaded from `backend/.env` or exported shell variables.
 
 Core settings:
 
-- `APP_ENV` : `development` locally, `production` in deployed environments
-- `DATABASE_URL` : defaults to local SQLite `sqlite:///./smartpantry.db`
-- `JWT_SECRET` : must be overridden for any non-local deployment
+- `APP_ENV`
+- `DATABASE_URL`
+- `JWT_SECRET`
 - `JWT_ALGORITHM`
 - `ACCESS_TOKEN_EXPIRE_MINUTES`
-- `CORS_ORIGINS` : comma-separated list of trusted frontend origins
+- `CORS_ORIGINS`
 
 Upload and detection:
 
@@ -83,6 +92,12 @@ Upload and detection:
 - `IMAGE_RETENTION_DAYS`
 - `IMAGE_CLEANUP_INTERVAL_MINUTES`
 - `IMAGE_CLEANUP_BATCH_LIMIT`
+- `AUTH_RATE_LIMIT_REQUESTS`
+- `AUTH_RATE_LIMIT_WINDOW_SECONDS`
+- `REGISTER_RATE_LIMIT_REQUESTS`
+- `REGISTER_RATE_LIMIT_WINDOW_SECONDS`
+- `IMAGE_UPLOAD_RATE_LIMIT_REQUESTS`
+- `IMAGE_UPLOAD_RATE_LIMIT_WINDOW_SECONDS`
 - `DETECTION_PROVIDER`
 - `YOLO_MODEL_NAME`
 - `DETECTION_CONFIDENCE_THRESHOLD`
@@ -91,154 +106,59 @@ Upload and detection:
 
 Storage:
 
-- `STORAGE_PROVIDER` = `local` or `r2`
+- `STORAGE_PROVIDER`
 - `LOCAL_STORAGE_DIR`
 - `R2_BUCKET_NAME`
 - `R2_ENDPOINT`
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
+- `CF_ACCOUNT_ID`
 
-## Database Notes
+## Data and Storage Model
 
-The local development database is SQLite:
+The backend intentionally separates:
 
-- file: `backend/smartpantry.db`
+- relational application state in the database
+- uploaded image bytes in blob/object storage
 
-Why SQLite now:
+Current deployment-oriented storage choice:
 
-- zero external setup
-- simple local development
-- fast enough for MVP and demo use
+- `STORAGE_PROVIDER=r2`
+- image bytes in Cloudflare R2
+- metadata and detection session state in PostgreSQL
 
-Planned next step:
+Retention behavior:
 
-- move to PostgreSQL for production deployment and stronger concurrency
+- expired image cleanup runs on startup
+- recurring cleanup runs in-process on an interval
+- image routes also perform opportunistic cleanup as a fallback
 
-The backend currently creates tables automatically on startup for MVP simplicity. Formal migrations are still a future hardening step.
+Rate limiting behavior:
 
-## Deployment Posture
-
-Current local-development defaults are intentionally easy to run, but they are not the intended production posture.
-
-Development-friendly defaults:
-
-- `APP_ENV=development`
-- SQLite
-- local storage
-- development JWT fallback secret
-- localhost CORS defaults
-
-Production-oriented target:
-
-- `APP_ENV=production`
-- PostgreSQL
-- strong `JWT_SECRET`
-- explicit deployed frontend origins in `CORS_ORIGINS`
-- `STORAGE_PROVIDER=r2` or another object-storage-backed option
-
-Current recommended cloud deployment target:
-
-- Vercel for the frontend
-- AWS EC2 for the backend and YOLO inference
-- Neon for PostgreSQL
-- Cloudflare R2 for uploaded image storage
-
-Why EC2 for the backend:
-
-- keeps the current FastAPI + YOLO architecture mostly unchanged
-- gives more control over RAM/CPU than low-memory free PaaS offerings
-- supports a stronger conventional backend deployment story than a demo-oriented ML host
-- works well with a simple Docker-based deployment flow
-
-The backend emits warnings at startup when clearly unsafe production-like settings are still in use.
-
-## Storage Modes
-
-### Local storage
-
-Good for development:
-
-- image bytes are stored under `backend/storage/`
-- structured metadata stays in SQLite
-
-### Cloudflare R2
-
-Supported for deployment-oriented storage:
-
-- image bytes are stored in R2
-- structured metadata stays in the database
-
-This separation is intentional:
-
-- object storage is for blobs and files
-- the database is for structured relational state
-
-Retention note:
-
-- `IMAGE_RETENTION_DAYS` defines the intended retention policy
-- the backend performs a startup sweep and recurring background cleanup for expired images
-- image routes still run opportunistic cleanup as a second line of defense
-- bucket lifecycle rules can still help on the storage side, especially for Cloudflare R2 deployments
+- login, registration, and image upload routes are protected by a lightweight in-memory limiter
+- this is appropriate for the current single-instance deployment
+- a distributed limiter backed by Redis or another shared store would be the next step if the app ever runs across multiple backend instances
 
 ## Detection Modes
 
 ### `yolo`
 
-- preferred local/demo detection provider
-- CPU inference path
-- downsizes oversized uploads before inference to keep phone photos more manageable
-- falls back to mock if inference or dependencies fail at runtime
+- primary detection mode for real AI-assisted review
+- downsizes oversized uploads before inference
+- warms the detection backend on startup to avoid first-request surprises
 
 ### `mock`
 
-- deterministic development and CI fallback
-- useful when ML dependencies are unavailable
-
-Detection evaluation script:
-
-```bash
-cd backend
-python scripts/eval_detection.py --images-dir /path/to/images --provider yolo --out-json ./eval_detection_report.json
-```
-
-Latency tuning:
-
-- `YOLO_MAX_IMAGE_DIM` caps how large an uploaded image stays before YOLO sees it
-- `YOLO_INFERENCE_SIZE` controls the model prediction size passed into YOLO
-- lower values are usually faster on CPU, but can trade away some small-object accuracy
+- deterministic fallback for development, CI, or low-resource environments
 
 Deployment note:
 
-- low-memory hosts such as small free-tier PaaS instances may still be too constrained for full YOLO inference
-- the current production direction is to run the backend on a host with more RAM rather than redesign the Smart Add flow immediately
-
-## Recipe Import
-
-Recipes are imported from a local CSV file outside the repo.
-
-Current expected dataset:
-
-- Kaggle `manjushwarkhairkar/all-recipe-dataset`
-
-Import command:
-
-```bash
-cd backend
-source .venv/bin/activate
-python scripts/import_recipes.py \
-  --input-csv "/absolute/path/to/All_Recipe_Web_Scraping_Dataset.csv"
-```
-
-What the importer does:
-
-- parses recipe metadata
-- splits ingredient strings
-- normalizes ingredient names
-- stores normalized rows for recommendation matching
+- small free-tier PaaS instances (Render) were not sufficient for the current YOLO CPU workload
+- the backend now targets a host with more RAM (AWS EC2) 
 
 ## Recipe API Surface
 
-Current recipe routes include:
+Current routes include:
 
 - `GET /recipes/recommendations`
 - `GET /recipes/{id}`
@@ -249,14 +169,32 @@ Current recipe routes include:
 - `POST /recipes/{id}/cook-preview`
 - `POST /recipes/{id}/cook-apply`
 
-Current behavior:
+Behavior:
 
 - recommendations are ranked against confirmed inventory
-- main ingredients are prioritized ahead of other inventory-only matches
 - dislikes are excluded from future recommendation pages
 - likes are saved to the favorite recipe book
-- hashtags are optional organization metadata inside the recipe book
-- pantry follow-through is conservative and requires explicit user review before inventory changes are applied
+- hashtags organize favorites without introducing heavier collection management
+- pantry follow-through remains conservative and explicitly reviewed
+
+## Deployment Posture
+
+Current deployed backend target:
+
+- AWS EC2
+- Ubuntu LTS
+- Dockerized FastAPI app
+- Nginx reverse proxy on port 80
+- Neon PostgreSQL
+- Cloudflare R2
+- Vercel frontend calling the backend through a same-origin proxy route
+
+Why this deployment shape:
+
+- keeps the FastAPI + YOLO architecture largely unchanged
+- gives the YOLO runtime more memory than low-memory free PaaS offerings
+- keeps frontend deployment simple on Vercel
+- avoids exposing backend secrets to the browser
 
 ## Testing
 
@@ -267,17 +205,15 @@ cd backend
 ./.venv/bin/python -m pytest -q
 ```
 
-Important test note:
+Important note:
 
-- pytest uses an isolated temporary SQLite database
-- test cleanup does not touch the local development database
-
-That isolation is intentional because recipe import and integration tests are destructive by design within the test environment.
+- pytest uses an isolated temporary database and temp storage paths
+- tests do not mutate the local development database
 
 ## Current Hardening Gaps
 
 - no formal migration framework yet
-- no rate limiting yet
-- startup still uses auto-create rather than a formal production migration path
-- PostgreSQL deployment path is documented but not yet implemented in-repo
-- detection still runs inline rather than via a dedicated background worker
+- current rate limiting is in-memory rather than distributed
+- no custom backend domain yet
+- detection still runs inline rather than via a dedicated worker or queue
+

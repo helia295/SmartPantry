@@ -18,6 +18,7 @@ from app.core.config import get_settings
 get_settings.cache_clear()
 
 from app.db import configure_database, engine
+from app.main import app
 
 configure_database(os.environ["DATABASE_URL"])
 
@@ -27,3 +28,10 @@ def cleanup_test_artifacts():
     yield
     engine.dispose()
     shutil.rmtree(TEST_ARTIFACTS_DIR, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    app.state.rate_limiter.clear()
+    yield
+    app.state.rate_limiter.clear()
