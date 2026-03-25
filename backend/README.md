@@ -14,6 +14,7 @@ For the product-level overview, see the repo root [README](../README.md).
 - recipe import, recommendation ranking, feedback, favorites, hashtags, and pantry follow-through APIs
 - storage abstraction for local filesystem and Cloudflare R2
 - startup and recurring cleanup of expired uploaded images
+- pantry-specific YOLO checkpoint loading and detection warmup
 
 ## Backend Structure
 
@@ -146,6 +147,7 @@ Rate limiting behavior:
 - primary detection mode for real AI-assisted review
 - downsizes oversized uploads before inference
 - warms the detection backend on startup to avoid first-request surprises
+- production currently points `YOLO_MODEL_NAME` at a pantry-finetuned YOLOv8n checkpoint mounted into the container from the EC2 host
 
 ### `mock`
 
@@ -154,7 +156,10 @@ Rate limiting behavior:
 Deployment note:
 
 - small free-tier PaaS instances (Render) were not sufficient for the current YOLO CPU workload
-- the backend now targets a host with more RAM (AWS EC2) 
+- the backend now targets a host with more RAM (AWS EC2)
+- generic `yolov8n.pt` baseline quality on the held-out pantry test set was poor (`0.020` mAP@50, `0.018` mAP@50-95)
+- pantry-domain fine-tuning improved the same test set to `0.472` mAP@50 and `0.361` mAP@50-95
+- after deploying the fine-tuned checkpoint, Smart Add latency improved to `689.9 ms` p50 / `752.7 ms` p95 on the public Vercel path and `584.7 ms` p50 / `665.6 ms` p95 on the direct backend path
 
 ## Recipe API Surface
 
@@ -195,6 +200,7 @@ Why this deployment shape:
 - gives the YOLO runtime more memory than low-memory free PaaS offerings
 - keeps frontend deployment simple on Vercel
 - avoids exposing backend secrets to the browser
+- allows the backend to mount a host-side model artifact into `/app/models` without baking large binaries into git
 
 ## Testing
 
