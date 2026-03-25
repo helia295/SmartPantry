@@ -156,7 +156,7 @@ python scripts/import_recipes.py \
 ## Known Limits
 
 - Detection still runs inline on CPU rather than through a dedicated background worker
-- No formal migration framework yet
+- Alembic is configured and the current production schema is stamped to the baseline revision, but deployment still keeps startup table creation enabled until the migration-first rollout is fully enforced
 - Current rate limiting is in-memory and single-instance rather than distributed
 - Recipe recommendations are deterministic and rules-based rather than personalized by a learned ranking model
 - The deployed backend currently uses an EC2 public IP plus Vercel proxying rather than a custom backend domain

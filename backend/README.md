@@ -212,8 +212,7 @@ Important note:
 
 ## Current Hardening Gaps
 
-- no formal migration framework yet
+- Alembic is configured and the current production schema is stamped to the baseline revision, but startup `create_all()` is still enabled until deployment is tightened around `alembic upgrade head`
 - current rate limiting is in-memory rather than distributed
 - no custom backend domain yet
 - detection still runs inline rather than via a dedicated worker or queue
-
