@@ -85,9 +85,19 @@ def _round(value: Any, digits: int = 4) -> float | None:
         return None
 
 
+def _extract_scalar_metric(primary: Any, *fallbacks: Any) -> float | None:
+    candidates = (primary, *fallbacks)
+    for value in candidates:
+        rounded = _round(value)
+        if rounded is not None:
+            return rounded
+    return None
+
+
 def summarize_metrics(metrics: Any, args: argparse.Namespace, model_name: str, data_yaml: Path) -> dict[str, Any]:
     box = getattr(metrics, "box", None)
     speed = getattr(metrics, "speed", None) or {}
+    results_dict = getattr(metrics, "results_dict", None) or {}
 
     class_names: dict[int, str] = {}
     names_raw = getattr(metrics, "names", None)
@@ -120,11 +130,28 @@ def summarize_metrics(metrics: Any, args: argparse.Namespace, model_name: str, d
             "split": args.split,
         },
         "metrics": {
-            "precision": _round(getattr(box, "p", None)),
-            "recall": _round(getattr(box, "r", None)),
-            "map50": _round(getattr(box, "map50", None)),
-            "map50_95": _round(getattr(box, "map", None)),
-            "fitness": _round(getattr(metrics, "fitness", None)),
+            "precision": _extract_scalar_metric(
+                getattr(box, "mp", None),
+                results_dict.get("metrics/precision(B)"),
+                getattr(box, "p", None),
+            ),
+            "recall": _extract_scalar_metric(
+                getattr(box, "mr", None),
+                results_dict.get("metrics/recall(B)"),
+                getattr(box, "r", None),
+            ),
+            "map50": _extract_scalar_metric(
+                getattr(box, "map50", None),
+                results_dict.get("metrics/mAP50(B)"),
+            ),
+            "map50_95": _extract_scalar_metric(
+                getattr(box, "map", None),
+                results_dict.get("metrics/mAP50-95(B)"),
+            ),
+            "fitness": _extract_scalar_metric(
+                getattr(metrics, "fitness", None),
+                results_dict.get("fitness"),
+            ),
         },
         "speed_ms_per_image": {
             key: _round(value, digits=2)
