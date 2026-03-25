@@ -7,11 +7,12 @@ SmartPantry is a full-stack, AI-assisted kitchen inventory app built around a hu
 - Account system with registration, login, display names, timezone support, account editing, and inactivity-aware session refresh
 - Inventory CRUD with inline editing, category grouping, quick add, and AI-assisted Smart Add
 - Cloud-backed image storage with Cloudflare R2
-- YOLO-based detection with explicit user review before inventory changes are persisted
+- Fine-tuned YOLOv8n-based detection with explicit user review before inventory changes are persisted
 - Grouped review, per-box review, and manual point-add for missed detections
 - Recent upload history with thumbnail previews and retention cleanup
 - Inventory-aware recipe recommendations with feedback, favorites, and reusable hashtags
 - Pantry follow-through flow that lets users review inventory changes after cooking
+- Measured deployment and model-improvement benchmarks for both latency and detector quality
 
 ## Current Architecture
 
@@ -21,7 +22,7 @@ Next.js frontend on Vercel
       -> FastAPI backend on AWS EC2 (Docker + Nginx)
           -> Neon PostgreSQL
           -> Cloudflare R2 for uploaded image blobs
-          -> In-process YOLO detection on CPU
+          -> In-process fine-tuned YOLOv8n detection on CPU
 ```
 
 Key design choices:
@@ -29,14 +30,21 @@ Key design choices:
 - Confirmed inventory is the source of truth. Detection proposals are always reviewable and never auto-committed.
 - The frontend stays on Vercel, but browser requests go through a same-origin proxy route instead of calling the EC2 backend directly.
 - Structured application state lives in the database, while uploaded image bytes live in object storage.
+- The deployed detector uses a pantry-finetuned YOLOv8n checkpoint instead of the generic pretrained baseline.
 - Recipe ranking is deterministic and explainable.
 - Recipe follow-through is conservative and user-reviewed instead of silently inferred.
+
+Selected measured results:
+
+- Smart Add latency on the deployed public path improved from `695.5 ms` p50 / `838.4 ms` p95 to `689.9 ms` p50 / `752.7 ms` p95 after deploying the fine-tuned model
+- Direct backend Smart Add latency improved from `644.2 ms` p50 / `734.1 ms` p95 to `584.7 ms` p50 / `665.6 ms` p95 after deploying the fine-tuned model
+- Held-out pantry test-set quality improved from `0.020` to `0.472` mAP@50 and from `0.018` to `0.361` mAP@50-95 after YOLOv8n fine-tuning
 
 ## Tech Stack
 
 - Frontend: Next.js 14, React 18
 - Backend: FastAPI, SQLAlchemy, Pydantic
-- Detection: Ultralytics YOLO
+- Detection: Ultralytics YOLOv8n, pantry-domain fine-tuning, custom evaluation scripts
 - Database: Neon PostgreSQL
 - Storage: Cloudflare R2
 - Deployment: Vercel + AWS EC2 + Nginx + Docker
@@ -160,6 +168,7 @@ python scripts/import_recipes.py \
 - Current rate limiting is in-memory and single-instance rather than distributed
 - Recipe recommendations are deterministic and rules-based rather than personalized by a learned ranking model
 - The deployed backend currently uses an EC2 public IP plus Vercel proxying rather than a custom backend domain
+- The fine-tuned checkpoint is mounted from the EC2 host into the backend container rather than stored in git or a model registry
 
 ## License
 
