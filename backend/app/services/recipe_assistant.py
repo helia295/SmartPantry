@@ -13,7 +13,7 @@ from app.schemas.assistant import (
     RecipeAssistantUseUpRequest,
 )
 from app.services.llm import generate_recipe_assistant_plan
-from app.services.recipes import get_recipe_detail, recommend_recipes
+from app.services.recipes import canonicalize_ingredient_phrase, get_recipe_detail, parse_csv_terms, recommend_recipes
 
 
 def _normalize_iso_days(value: Optional[datetime]) -> int | None:
@@ -38,6 +38,66 @@ def _serialize_inventory_item(item: InventoryItem) -> dict[str, Any]:
     }
 
 
+def _normalize_prioritized_ingredients(
+    *,
+    prioritized_ingredients: list[str],
+    pantry_items: list[InventoryItem],
+) -> list[str]:
+    available_names: dict[str, str] = {}
+    for item in pantry_items:
+        normalized = canonicalize_ingredient_phrase(item.normalized_name or item.name)
+        if normalized:
+            available_names.setdefault(normalized, item.name)
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw_value in prioritized_ingredients:
+        normalized = canonicalize_ingredient_phrase(raw_value)
+        if not normalized or normalized in seen or normalized not in available_names:
+            continue
+        seen.add(normalized)
+        cleaned.append(normalized)
+    return cleaned
+
+
+def _build_effective_main_ingredients(
+    *,
+    request: RecipeAssistantUseUpRequest,
+    prioritized_ingredients: list[str],
+) -> str | None:
+    merged_terms = list(dict.fromkeys(parse_csv_terms(request.main_ingredients) + prioritized_ingredients))
+    if not merged_terms:
+        return None
+    return ",".join(merged_terms)
+
+
+def _sort_pantry_items_for_assistant(
+    *,
+    pantry_items: list[InventoryItem],
+    prioritized_ingredients: list[str],
+    prioritize_oldest_items: bool,
+) -> list[InventoryItem]:
+    prioritized_index = {name: index for index, name in enumerate(prioritized_ingredients)}
+
+    def sort_key(item: InventoryItem) -> tuple[int, int, int, str]:
+        normalized = canonicalize_ingredient_phrase(item.normalized_name or item.name)
+        selected_rank = prioritized_index.get(normalized, 999)
+        perishable_rank = 0 if item.is_perishable else 1
+        oldest_rank = (
+            -(_normalize_iso_days(item.created_at) or 0)
+            if prioritize_oldest_items and item.is_perishable
+            else 0
+        )
+        return (
+            selected_rank,
+            perishable_rank,
+            oldest_rank,
+            item.name.lower(),
+        )
+
+    return sorted(pantry_items, key=sort_key)
+
+
 def _build_empty_response(*, pantry_items_to_use_first: list[str]) -> RecipeAssistantUseUpRead:
     return RecipeAssistantUseUpRead(
         summary="I couldn't find strong pantry-based recipe matches yet.",
@@ -54,13 +114,14 @@ def _build_prompt_payload(
     candidate_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
     settings = get_settings()
-    sorted_pantry_items = sorted(
-        pantry_items,
-        key=lambda item: (
-            0 if item.is_perishable else 1,
-            -(_normalize_iso_days(item.created_at) or 0),
-            item.name.lower(),
-        ),
+    prioritized_ingredients = _normalize_prioritized_ingredients(
+        prioritized_ingredients=request.prioritized_ingredients,
+        pantry_items=pantry_items,
+    )
+    sorted_pantry_items = _sort_pantry_items_for_assistant(
+        pantry_items=pantry_items,
+        prioritized_ingredients=prioritized_ingredients,
+        prioritize_oldest_items=request.prioritize_oldest_items,
     )
     prioritized_pantry = sorted_pantry_items[: max(settings.openai_assistant_max_pantry_items, 1)]
 
@@ -86,14 +147,25 @@ def _build_prompt_payload(
         )
 
     pantry_items_to_use_first = [item["name"] for item in map(_serialize_inventory_item, prioritized_pantry[:6])]
+    prioritization_hint = (
+        "Prefer recipes that use the user's selected pantry items and also favor older perishable items first."
+        if request.prioritize_oldest_items and prioritized_ingredients
+        else "Prefer recipes that use older perishable items first."
+        if request.prioritize_oldest_items
+        else "Prefer recipes that use the user's selected pantry items first and do not force age-based prioritization."
+        if prioritized_ingredients
+        else "Prioritize pantry fit and user request without forcing age-based prioritization."
+    )
 
     return {
         "user_request": {
             "goal": (request.user_goal or "").strip() or None,
             "main_ingredients": (request.main_ingredients or "").strip() or None,
             "max_total_minutes": request.max_total_minutes,
+            "prioritize_oldest_items": request.prioritize_oldest_items,
+            "prioritized_ingredients": prioritized_ingredients,
         },
-        "prioritization_hint": "Prefer recipes that use perishable items and the oldest pantry items first.",
+        "prioritization_hint": prioritization_hint,
         "pantry_items_to_use_first": pantry_items_to_use_first,
         "pantry_items": [_serialize_inventory_item(item) for item in prioritized_pantry],
         "candidate_recipes": candidate_recipes,
@@ -122,23 +194,28 @@ def build_recipe_assistant_response(
             recipes=[],
         )
 
+    prioritized_ingredients = _normalize_prioritized_ingredients(
+        prioritized_ingredients=payload.prioritized_ingredients,
+        pantry_items=pantry_items,
+    )
+
     recommendation_payload = recommend_recipes(
         db=db,
         current_user=current_user,
-        main_ingredients=payload.main_ingredients,
+        main_ingredients=_build_effective_main_ingredients(
+            request=payload,
+            prioritized_ingredients=prioritized_ingredients,
+        ),
         max_total_minutes=payload.max_total_minutes,
         page=1,
         page_size=max(settings.openai_assistant_max_recipes, 3),
     )
     raw_results = recommendation_payload.get("results", [])
 
-    prioritized_pantry = sorted(
-        pantry_items,
-        key=lambda item: (
-            0 if item.is_perishable else 1,
-            -(_normalize_iso_days(item.created_at) or 0),
-            item.name.lower(),
-        ),
+    prioritized_pantry = _sort_pantry_items_for_assistant(
+        pantry_items=pantry_items,
+        prioritized_ingredients=prioritized_ingredients,
+        prioritize_oldest_items=payload.prioritize_oldest_items,
     )
     pantry_items_to_use_first = [item.name for item in prioritized_pantry[:6]]
 

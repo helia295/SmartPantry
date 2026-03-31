@@ -7,6 +7,8 @@ class RecipeAssistantUseUpRequest(BaseModel):
     user_goal: Optional[str] = Field(default=None, max_length=240)
     main_ingredients: Optional[str] = Field(default=None, max_length=240)
     max_total_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    prioritize_oldest_items: bool = True
+    prioritized_ingredients: list[str] = Field(default_factory=list, max_length=12)
 
 
 class RecipeAssistantSuggestionRead(BaseModel):

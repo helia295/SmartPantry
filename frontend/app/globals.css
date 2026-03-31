@@ -1,10 +1,10 @@
 :root {
-  --bg: linear-gradient(180deg, #fff8ef 0%, #fff2df 42%, #ffe9d6 100%);
+  --bg: linear-gradient(180deg, #fff8eb 0%, #fff3e1 58%, #ffedd9 100%);
   --bg-pattern:
-    radial-gradient(circle at 12% 18%, rgba(255, 178, 122, 0.24) 0, rgba(255, 178, 122, 0) 18%),
-    radial-gradient(circle at 85% 14%, rgba(255, 224, 123, 0.25) 0, rgba(255, 224, 123, 0) 17%),
-    radial-gradient(circle at 84% 74%, rgba(136, 214, 185, 0.22) 0, rgba(136, 214, 185, 0) 20%),
-    radial-gradient(circle at 17% 82%, rgba(255, 140, 140, 0.18) 0, rgba(255, 140, 140, 0) 18%);
+    radial-gradient(circle at 12% 18%, rgba(255, 194, 132, 0.14) 0, rgba(255, 194, 132, 0) 18%),
+    radial-gradient(circle at 85% 14%, rgba(255, 222, 150, 0.14) 0, rgba(255, 222, 150, 0) 17%),
+    radial-gradient(circle at 84% 74%, rgba(151, 218, 192, 0.12) 0, rgba(151, 218, 192, 0) 20%),
+    radial-gradient(circle at 17% 82%, rgba(255, 160, 146, 0.1) 0, rgba(255, 160, 146, 0) 18%);
   --surface: rgba(255, 250, 245, 0.9);
   --surface-strong: rgba(255, 248, 240, 0.98);
   --surface-soft: rgba(255, 243, 231, 0.88);
@@ -48,7 +48,7 @@ body::before {
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.34), transparent 34%),
     linear-gradient(315deg, rgba(255, 255, 255, 0.18), transparent 34%);
-  opacity: 0.65;
+  opacity: 0.38;
 }
 
 a {
@@ -131,13 +131,19 @@ button:focus {
 }
 
 .hero-copy {
-  max-width: 720px;
+  max-width: 800px;
 }
 
 .brand-lockup {
   display: flex;
   align-items: center;
   gap: 0.9rem;
+}
+
+.brand-wordmark {
+  display: block;
+  width: min(580px, 100%);
+  height: auto;
 }
 
 .brand-badge {
@@ -206,9 +212,19 @@ h3 {
 
 .subtitle {
   color: var(--muted);
-  margin-top: 0.4rem;
+  margin-top: 0.5rem;
   font-size: 1.08rem;
-  line-height: 1.55;
+  line-height: 1.65;
+  max-width: 50rem;
+}
+
+.hero-message {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.hero-message p {
+  margin: 0;
 }
 
 .timezone-panel {
@@ -716,6 +732,87 @@ h3 {
   align-items: center;
 }
 
+.recipe-assistant-options {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.recipe-assistant-toggle {
+  min-height: 100%;
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
+  background: rgba(255, 247, 239, 0.86);
+  border: 1px solid rgba(219, 152, 89, 0.16);
+}
+
+.recipe-assistant-ingredient-picker {
+  display: grid;
+  gap: 0.35rem;
+  position: relative;
+  align-content: start;
+}
+
+.recipe-assistant-picker-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.85rem 0.95rem;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: none;
+  color: var(--text-strong);
+}
+
+.recipe-assistant-picker-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  z-index: 8;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 20px;
+  padding: 0.55rem;
+  border: 1px solid rgba(219, 152, 89, 0.22);
+  background: rgba(255, 251, 246, 0.98);
+  box-shadow: 0 16px 28px rgba(196, 132, 97, 0.18);
+}
+
+.recipe-assistant-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 14px;
+}
+
+.recipe-assistant-picker-option:hover {
+  background: rgba(255, 241, 226, 0.74);
+}
+
+.recipe-assistant-selected-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.recipe-assistant-selected-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(255, 235, 214, 0.94);
+  border: 1px solid rgba(224, 155, 115, 0.2);
+  box-shadow: none;
+  color: #8c4d32;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .recipe-assistant-results {
   display: grid;
   gap: 0.85rem;
@@ -994,7 +1091,8 @@ h3 {
   }
 
   .recipe-assistant-card-grid,
-  .recipe-assistant-controls {
+  .recipe-assistant-controls,
+  .recipe-assistant-options {
     grid-template-columns: 1fr;
   }
 }

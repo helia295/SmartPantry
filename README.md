@@ -11,7 +11,7 @@ SmartPantry is a full-stack, AI-assisted kitchen inventory app built around a hu
 - Grouped review, per-box review, and manual point-add for missed detections
 - Recent upload history with thumbnail previews and retention cleanup
 - Inventory-aware recipe recommendations with feedback, favorites, and reusable hashtags
-- OpenAI-backed pantry assistant that explains which recipes best fit current inventory, mood, and older pantry items
+- OpenAI-backed pantry assistant that explains which recipes best fit current inventory, mood, priority ingredients, and older perishables
 - Pantry follow-through flow that lets users review inventory changes after cooking
 - Measured deployment and model-improvement benchmarks for both latency and detector quality
 

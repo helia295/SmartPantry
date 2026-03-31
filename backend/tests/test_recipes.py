@@ -1,11 +1,13 @@
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from typing import Optional
 
 import app.api.recipes as recipe_routes
+import app.services.recipe_assistant as recipe_assistant_service
 from app.db import Base, SessionLocal, engine, ensure_sqlite_schema_compatibility
 from app.main import app
 from app.models import (
@@ -135,6 +137,28 @@ def add_inventory_item(user_id: int, name: str) -> None:
                 normalized_name=name.strip().lower(),
                 quantity=1.0,
                 unit="count",
+            )
+        )
+        db.commit()
+
+
+def add_inventory_item_with_metadata(
+    user_id: int,
+    name: str,
+    *,
+    is_perishable: bool = False,
+    created_at: Optional[datetime] = None,
+) -> None:
+    with SessionLocal() as db:
+        db.add(
+            InventoryItem(
+                user_id=user_id,
+                name=name,
+                normalized_name=name.strip().lower(),
+                quantity=1.0,
+                unit="count",
+                is_perishable=is_perishable,
+                created_at=created_at,
             )
         )
         db.commit()
@@ -782,3 +806,134 @@ def test_recipe_assistant_returns_inventory_guidance_without_llm_when_pantry_is_
         )
     assert result.recipes == []
     assert "Add a few pantry items first" in result.summary
+
+
+def test_recipe_assistant_can_prioritize_selected_ingredients_without_oldest_bias(monkeypatch: pytest.MonkeyPatch):
+    class DummyUser:
+        id = 777
+
+    add_inventory_item_with_metadata(DummyUser.id, "apple", is_perishable=False)
+    add_inventory_item_with_metadata(DummyUser.id, "spinach", is_perishable=True)
+
+    apple_recipe_id = seed_recipe(
+        title="Apple Oat Bowl",
+        slug="apple-oat-bowl",
+        total_minutes=10,
+        ingredients=["apple", "oats"],
+    )
+    seed_recipe(
+        title="Spinach Eggs",
+        slug="spinach-eggs",
+        total_minutes=12,
+        ingredients=["spinach", "egg"],
+    )
+
+    def fake_generate_recipe_assistant_plan(*, prompt_payload):
+        assert prompt_payload["user_request"]["prioritize_oldest_items"] is False
+        assert prompt_payload["user_request"]["prioritized_ingredients"] == ["apple"]
+        assert prompt_payload["pantry_items_to_use_first"][0].lower() == "apple"
+        return RecipeAssistantUseUpRead(
+            summary="Start with the apple bowl.",
+            strategy_note="You asked to prioritize apple specifically.",
+            pantry_items_to_use_first=prompt_payload["pantry_items_to_use_first"],
+            recipes=[
+                {
+                    "recipe_id": apple_recipe_id,
+                    "title": "Apple Oat Bowl",
+                    "reason": "It directly uses the ingredient you selected.",
+                    "uses_up": ["apple"],
+                    "missing_ingredients": [],
+                    "substitution_ideas": [],
+                    "time_note": "About 10 minutes total.",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(
+        recipe_assistant_service,
+        "generate_recipe_assistant_plan",
+        fake_generate_recipe_assistant_plan,
+    )
+
+    with SessionLocal() as db:
+        result = build_recipe_assistant_response(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeAssistantUseUpRequest(
+                user_goal="quick breakfast",
+                prioritize_oldest_items=False,
+                prioritized_ingredients=["apple"],
+            ),
+        )
+
+    assert result.pantry_items_to_use_first[0].lower() == "apple"
+    assert result.summary == "Start with the apple bowl."
+
+
+def test_recipe_assistant_oldest_toggle_only_reorders_perishables(monkeypatch: pytest.MonkeyPatch):
+    class DummyUser:
+        id = 778
+
+    now = datetime.now(timezone.utc)
+    add_inventory_item_with_metadata(
+        DummyUser.id,
+        "rice",
+        is_perishable=False,
+        created_at=now - timedelta(days=30),
+    )
+    add_inventory_item_with_metadata(
+        DummyUser.id,
+        "spinach",
+        is_perishable=True,
+        created_at=now - timedelta(days=2),
+    )
+    add_inventory_item_with_metadata(
+        DummyUser.id,
+        "berries",
+        is_perishable=True,
+        created_at=now - timedelta(days=6),
+    )
+
+    recipe_id = seed_recipe(
+        title="Berry Spinach Bowl",
+        slug="berry-spinach-bowl",
+        total_minutes=12,
+        ingredients=["berries", "spinach", "yogurt"],
+    )
+
+    def fake_generate_recipe_assistant_plan(*, prompt_payload):
+        assert prompt_payload["pantry_items_to_use_first"][:3] == ["berries", "spinach", "rice"]
+        return RecipeAssistantUseUpRead(
+            summary="Use the older berries first.",
+            strategy_note="Perishable items should rise above shelf-stable pantry goods.",
+            pantry_items_to_use_first=prompt_payload["pantry_items_to_use_first"],
+            recipes=[
+                {
+                    "recipe_id": recipe_id,
+                    "title": "Berry Spinach Bowl",
+                    "reason": "It uses the older perishables first.",
+                    "uses_up": ["berries", "spinach"],
+                    "missing_ingredients": ["yogurt"],
+                    "substitution_ideas": [],
+                    "time_note": "About 12 minutes total.",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(
+        recipe_assistant_service,
+        "generate_recipe_assistant_plan",
+        fake_generate_recipe_assistant_plan,
+    )
+
+    with SessionLocal() as db:
+        result = build_recipe_assistant_response(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeAssistantUseUpRequest(
+                user_goal="light breakfast",
+                prioritize_oldest_items=True,
+            ),
+        )
+
+    assert result.pantry_items_to_use_first[:3] == ["berries", "spinach", "rice"]

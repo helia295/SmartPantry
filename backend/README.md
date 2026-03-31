@@ -179,9 +179,10 @@ The backend flow is:
 
 1. load confirmed pantry inventory
 2. rank recipe candidates with the existing `recommend_recipes()` service
-3. include pantry-age signals such as perishable status and oldest items in stock
-4. send only the top candidate recipes plus compact pantry context to the OpenAI API
-5. return structured JSON that the frontend can render directly
+3. include pantry-age signals such as perishable status and older perishables in stock
+4. optionally boost user-selected pantry ingredients and optional age-based prioritization choices
+5. send only the top candidate recipes plus compact pantry context to the OpenAI API
+6. return structured JSON that the frontend can render directly
 
 Why this design:
 
@@ -207,7 +208,8 @@ Current routes include:
 Behavior:
 
 - the pantry assistant is advisory only and never writes inventory state
-- older or perishable pantry items are surfaced as an explicit prioritization signal to the assistant
+- older perishable pantry items can be surfaced as an explicit prioritization signal to the assistant
+- users can also explicitly prioritize specific pantry ingredients from the UI, and those ingredients are used both for candidate ranking bias and assistant guidance
 - recommendations are ranked against confirmed inventory
 - dislikes are excluded from future recommendation pages
 - likes are saved to the favorite recipe book

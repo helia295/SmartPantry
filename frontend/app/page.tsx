@@ -79,6 +79,11 @@ type RecipeAssistantResponse = {
   recipes: RecipeAssistantSuggestion[];
 };
 
+type AssistantIngredientOption = {
+  value: string;
+  label: string;
+};
+
 type ImageRecord = {
   id: number;
   user_id: number;
@@ -411,6 +416,9 @@ export default function Home() {
   const [recipeTotalResults, setRecipeTotalResults] = useState(0);
   const [assistantGoal, setAssistantGoal] = useState("");
   const [assistantMaxTotalMinutes, setAssistantMaxTotalMinutes] = useState("");
+  const [assistantPrioritizeOldest, setAssistantPrioritizeOldest] = useState(true);
+  const [assistantPrioritizedIngredients, setAssistantPrioritizedIngredients] = useState<string[]>([]);
+  const [assistantIngredientPickerOpen, setAssistantIngredientPickerOpen] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantResult, setAssistantResult] = useState<RecipeAssistantResponse | null>(null);
   const [assistantError, setAssistantError] = useState<string | null>(null);
@@ -422,6 +430,7 @@ export default function Home() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const activeImageRef = useRef<HTMLImageElement | null>(null);
   const cameraSectionRef = useRef<HTMLElement | null>(null);
+  const assistantIngredientPickerRef = useRef<HTMLDivElement | null>(null);
 
   const [activeImageBounds, setActiveImageBounds] = useState<{
     left: number;
@@ -513,6 +522,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    function handleOutsideClick(event: MouseEvent | globalThis.MouseEvent) {
+      if (!assistantIngredientPickerRef.current) return;
+      if (assistantIngredientPickerRef.current.contains(event.target as Node)) return;
+      setAssistantIngredientPickerOpen(false);
+    }
+
+    if (assistantIngredientPickerOpen) {
+      window.addEventListener("mousedown", handleOutsideClick);
+    }
+    return () => window.removeEventListener("mousedown", handleOutsideClick);
+  }, [assistantIngredientPickerOpen]);
+
+  useEffect(() => {
     if (!token) return;
     void loadCurrentUser();
     void loadInventory();
@@ -583,6 +605,17 @@ export default function Home() {
     (count, frame) => count + (frame.image.pending_proposal_count ?? frame.proposals?.filter((proposal) => proposal.state === "pending").length ?? 0),
     0
   );
+  const assistantIngredientOptions = useMemo<AssistantIngredientOption[]>(() => {
+    const seen = new Set<string>();
+    return inventory
+      .map((item) => ({ value: item.normalized_name || normalizeLabel(item.name), label: item.name }))
+      .filter((item) => {
+        if (!item.value || seen.has(item.value)) return false;
+        seen.add(item.value);
+        return true;
+      })
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [inventory]);
 
   function showNotice(section: NoticeSection, tone: NoticeTone, text: string) {
     setNotice({ section, tone, text });
@@ -1494,6 +1527,8 @@ export default function Home() {
         ? Number(assistantMaxTotalMinutes.trim())
         : null,
       main_ingredients: recipeMainIngredients.trim() || null,
+      prioritize_oldest_items: assistantPrioritizeOldest,
+      prioritized_ingredients: assistantPrioritizedIngredients,
     };
 
     const res = await fetch(`${API_BASE}/recipes/assistant/use-up`, {
@@ -1520,6 +1555,16 @@ export default function Home() {
         ? "Sous chef suggestions are ready."
         : "The assistant needs a little more pantry context before it can narrow things down."
     );
+  }
+
+  function toggleAssistantIngredientSelection(nextValue: string) {
+    setAssistantPrioritizedIngredients((prev) =>
+      prev.includes(nextValue) ? prev.filter((value) => value !== nextValue) : [...prev, nextValue]
+    );
+  }
+
+  function removeAssistantIngredientSelection(valueToRemove: string) {
+    setAssistantPrioritizedIngredients((prev) => prev.filter((value) => value !== valueToRemove));
   }
 
   async function submitRecipeFeedback(recipeId: number, feedbackType: "like" | "dislike") {
@@ -1655,17 +1700,23 @@ export default function Home() {
     <main className="app-wrap">
       <section className="shell">
         <div className="hero-row">
-          <div className="hero-copy">
-            <div className="brand-lockup">
-              <span className="brand-badge" aria-hidden="true" />
-              <div>
-                <p className="eyebrow">AI-assisted pantry helper</p>
-                <h1 className="title">SmartPantry</h1>
+            <div className="hero-copy">
+              <div className="brand-lockup">
+                <div>
+                  <p className="eyebrow">AI-assisted pantry helper</p>
+                  <img
+                    src="/smartpantry-wordmark.png"
+                    alt="SmartPantry"
+                    className="brand-wordmark"
+                  />
+                </div>
               </div>
+            <div className="subtitle hero-message">
+              <p>Keep your kitchen organized with faster inventory updates and AI-assisted photo review.</p>
+              <p>
+                Then get pantry-aware recipe suggestions, with a smarter ask-anything recipe AI guide.
+              </p>
             </div>
-            <p className="subtitle">
-              Keep track of your kitchen in one place. Add and update items faster with AI-assisted photo review, then find recipes from what is already in your inventory.
-            </p>
           </div>
 
           <div className="header-actions">
@@ -2422,13 +2473,13 @@ export default function Home() {
           <div className="recipe-assistant-shell">
             <div className="recipe-assistant-panel">
               <div className="recipe-assistant-copy">
-                <p className="eyebrow">Pantry assistant</p>
-                <h3>Let SmartPantry pick the best recipe moves for you.</h3>
+                <p className="eyebrow">Smart recipe assistant</p>
+                <h3>Let SmartPantry build a recipe shortlist for you.</h3>
                 <p className="muted-text">
-                  Get a short list of recipes that best fit your pantry, your current craving, and the items that have been sitting around the longest.
+                  Get quick recipe suggestions based on what you already have, what sounds good right now, and the ingredients you want to use first.
                 </p>
                 <p className="tiny-text">
-                  Prefer to search on your own instead? The manual Find Recipes controls are still right below.
+                  Want to browse manually instead? Use the Find Recipe controls above anytime.
                 </p>
               </div>
 
@@ -2436,7 +2487,7 @@ export default function Home() {
                 <input
                   value={assistantGoal}
                   onChange={(e) => setAssistantGoal(e.target.value)}
-                  placeholder="What are you in the mood for? e.g. quick dinner, cozy lunch"
+                  placeholder="What are you in the mood for? e.g. quick dinner, light lunch"
                 />
                 <input
                   value={assistantMaxTotalMinutes}
@@ -2447,8 +2498,78 @@ export default function Home() {
                   placeholder="Max minutes (optional)"
                 />
                 <button onClick={() => void runRecipeAssistant()} disabled={assistantLoading}>
-                  {assistantLoading ? "Thinking..." : "Ask SmartPantry"}
+                  {assistantLoading ? "Thinking..." : "Get suggestions"}
                 </button>
+              </div>
+
+              <div className="recipe-assistant-options">
+                <label className="checkbox-label recipe-assistant-toggle">
+                  <input
+                    type="checkbox"
+                    checked={assistantPrioritizeOldest}
+                    onChange={(e) => setAssistantPrioritizeOldest(e.target.checked)}
+                  />
+                  Prioritize older perishables
+                </label>
+
+                <div className="recipe-assistant-ingredient-picker" ref={assistantIngredientPickerRef}>
+                  <label className="tiny-text" htmlFor="assistant-prioritized-ingredients-button">
+                    Priority ingredients
+                  </label>
+                  <button
+                    id="assistant-prioritized-ingredients-button"
+                    type="button"
+                    className="recipe-assistant-picker-button"
+                    onClick={() => setAssistantIngredientPickerOpen((prev) => !prev)}
+                  >
+                    <span>
+                      {assistantPrioritizedIngredients.length > 0
+                        ? `${assistantPrioritizedIngredients.length} ingredient${assistantPrioritizedIngredients.length === 1 ? "" : "s"} selected`
+                        : "Select pantry items"}
+                    </span>
+                    <span aria-hidden="true">{assistantIngredientPickerOpen ? "▲" : "▼"}</span>
+                  </button>
+                  {assistantIngredientPickerOpen && (
+                    <div className="recipe-assistant-picker-menu">
+                      {assistantIngredientOptions.length > 0 ? (
+                        assistantIngredientOptions.map((option) => (
+                          <label key={option.value} className="recipe-assistant-picker-option">
+                            <input
+                              type="checkbox"
+                              checked={assistantPrioritizedIngredients.includes(option.value)}
+                              onChange={() => toggleAssistantIngredientSelection(option.value)}
+                            />
+                            <span>{option.label}</span>
+                          </label>
+                        ))
+                      ) : (
+                        <p className="tiny-text">Add pantry items first to choose them here.</p>
+                      )}
+                    </div>
+                  )}
+                  {assistantPrioritizedIngredients.length > 0 && (
+                    <div className="recipe-assistant-selected-row">
+                      {assistantPrioritizedIngredients.map((value) => {
+                        const label =
+                          assistantIngredientOptions.find((option) => option.value === value)?.label || value;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            className="recipe-assistant-selected-pill"
+                            onClick={() => removeAssistantIngredientSelection(value)}
+                          >
+                            <span>{label}</span>
+                            <span aria-hidden="true">×</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="tiny-text">
+                    Optional. Pick specific pantry items when you want the shortlist to center around them.
+                  </p>
+                </div>
               </div>
 
               {assistantError && (
