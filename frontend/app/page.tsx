@@ -2473,7 +2473,7 @@ export default function Home() {
           <div className="recipe-assistant-shell">
             <div className="recipe-assistant-panel">
               <div className="recipe-assistant-copy">
-                <p className="eyebrow">Smart recipe assistant</p>
+                <p className="eyebrow">SmartPantry assistant</p>
                 <h3>Let SmartPantry build a recipe shortlist for you.</h3>
                 <p className="muted-text">
                   Get quick recipe suggestions based on what you already have, what sounds good right now, and the ingredients you want to use first.
