@@ -5,6 +5,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from typing import Optional
 
+import app.api.recipes as recipe_routes
 from app.db import Base, SessionLocal, engine, ensure_sqlite_schema_compatibility
 from app.main import app
 from app.models import (
@@ -16,6 +17,10 @@ from app.models import (
     RecipeTag,
     RecipeTagLink,
 )
+from app.schemas import RecipeAssistantUseUpRead
+from app.services.llm import RecipeAssistantUpstreamError
+from app.services.recipe_assistant import build_recipe_assistant_response
+from app.schemas.assistant import RecipeAssistantUseUpRequest
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -704,3 +709,76 @@ async def test_recommendations_are_paginated_in_pages_of_ten(client: AsyncClient
     second_body = second_page.json()
     assert second_body["page"] == 2
     assert len(second_body["results"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_use_up_my_pantry_assistant_requires_auth(client: AsyncClient):
+    res = await client.post("/recipes/assistant/use-up", json={})
+    assert res.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_use_up_my_pantry_assistant_returns_structured_response(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def fake_assistant_response(**_: object) -> RecipeAssistantUseUpRead:
+        return RecipeAssistantUseUpRead(
+            summary="Start with the soup and the stir fry to use older produce first.",
+            strategy_note="Lean on quick recipes when produce is getting old.",
+            pantry_items_to_use_first=["spinach", "mushroom"],
+            recipes=[
+                {
+                    "recipe_id": 7,
+                    "title": "Mushroom Spinach Soup",
+                    "reason": "It uses your oldest greens and cooks quickly.",
+                    "uses_up": ["spinach", "mushroom"],
+                    "missing_ingredients": ["broth"],
+                    "substitution_ideas": ["Use water plus seasoning if broth is missing."],
+                    "time_note": "About 20 minutes total.",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(recipe_routes, "build_recipe_assistant_response", fake_assistant_response)
+
+    res = await client.post(
+        "/recipes/assistant/use-up",
+        headers=headers,
+        json={"user_goal": "quick dinner", "max_total_minutes": 30},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["summary"].startswith("Start with the soup")
+    assert body["pantry_items_to_use_first"] == ["spinach", "mushroom"]
+    assert body["recipes"][0]["recipe_id"] == 7
+    assert body["recipes"][0]["uses_up"] == ["spinach", "mushroom"]
+
+
+@pytest.mark.asyncio
+async def test_use_up_my_pantry_assistant_handles_upstream_failure(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def fake_failure(**_: object) -> RecipeAssistantUseUpRead:
+        raise RecipeAssistantUpstreamError("The pantry assistant request failed.")
+
+    monkeypatch.setattr(recipe_routes, "build_recipe_assistant_response", fake_failure)
+
+    res = await client.post("/recipes/assistant/use-up", headers=headers, json={})
+    assert res.status_code == 502
+    assert res.json()["detail"] == "The pantry assistant request failed."
+
+
+def test_recipe_assistant_returns_inventory_guidance_without_llm_when_pantry_is_empty():
+    class DummyUser:
+        id = 999
+
+    with SessionLocal() as db:
+        result = build_recipe_assistant_response(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeAssistantUseUpRequest(user_goal="easy dinner"),
+        )
+    assert result.recipes == []
+    assert "Add a few pantry items first" in result.summary

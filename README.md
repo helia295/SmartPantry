@@ -11,6 +11,7 @@ SmartPantry is a full-stack, AI-assisted kitchen inventory app built around a hu
 - Grouped review, per-box review, and manual point-add for missed detections
 - Recent upload history with thumbnail previews and retention cleanup
 - Inventory-aware recipe recommendations with feedback, favorites, and reusable hashtags
+- OpenAI-backed pantry assistant that explains which recipes best fit current inventory, mood, and older pantry items
 - Pantry follow-through flow that lets users review inventory changes after cooking
 - Measured deployment and model-improvement benchmarks for both latency and detector quality
 
@@ -32,6 +33,7 @@ Key design choices:
 - Structured application state lives in the database, while uploaded image bytes live in object storage.
 - The deployed detector uses a pantry-finetuned YOLOv8n checkpoint instead of the generic pretrained baseline.
 - Recipe ranking is deterministic and explainable.
+- The pantry assistant is additive: the backend still ranks recipe candidates deterministically first, then uses an LLM to explain and prioritize the best few options.
 - Recipe follow-through is conservative and user-reviewed instead of silently inferred.
 
 Selected measured results:
@@ -44,6 +46,7 @@ Selected measured results:
 
 - Frontend: Next.js 14, React 18
 - Backend: FastAPI, SQLAlchemy, Pydantic
+- LLM integration: OpenAI Responses API (`gpt-5-mini`) with structured JSON output
 - Detection: Ultralytics YOLOv8n, pantry-domain fine-tuning, custom evaluation scripts
 - Database: Neon PostgreSQL
 - Storage: Cloudflare R2
@@ -116,6 +119,12 @@ Backend settings commonly needed in deployment:
 - `YOLO_MODEL_NAME`
 - `YOLO_INFERENCE_SIZE`
 - `YOLO_MAX_IMAGE_DIM`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_ASSISTANT_ENABLED`
+- `OPENAI_ASSISTANT_TIMEOUT_SECONDS`
+- `OPENAI_ASSISTANT_MAX_RECIPES`
+- `OPENAI_ASSISTANT_MAX_PANTRY_ITEMS`
 
 Frontend:
 
@@ -167,6 +176,7 @@ python scripts/import_recipes.py \
 - Alembic is configured and the current production schema is stamped to the baseline revision, but deployment still keeps startup table creation enabled until the migration-first rollout is fully enforced
 - Current rate limiting is in-memory and single-instance rather than distributed
 - Recipe recommendations are deterministic and rules-based rather than personalized by a learned ranking model
+- The pantry assistant is grounded on pantry state and backend-ranked recipe candidates, but it is still advisory rather than a source of truth
 - The deployed backend currently uses an EC2 public IP plus Vercel proxying rather than a custom backend domain
 - The fine-tuned checkpoint is mounted from the EC2 host into the backend container rather than stored in git or a model registry
 

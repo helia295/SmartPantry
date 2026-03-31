@@ -40,6 +40,11 @@ from app.schemas.recipe import (
     RecipeCookPreviewRead,
     RecipeCookPreviewRequest,
 )
+from app.schemas.assistant import (
+    RecipeAssistantSuggestionRead,
+    RecipeAssistantUseUpRead,
+    RecipeAssistantUseUpRequest,
+)
 
 __all__ = [
     "UserBase",
@@ -80,4 +85,7 @@ __all__ = [
     "RecipeCookPreviewRead",
     "RecipeCookApplyRequest",
     "RecipeCookApplyRead",
+    "RecipeAssistantUseUpRequest",
+    "RecipeAssistantSuggestionRead",
+    "RecipeAssistantUseUpRead",
 ]

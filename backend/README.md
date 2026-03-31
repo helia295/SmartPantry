@@ -12,6 +12,7 @@ For the product-level overview, see the repo root [README](../README.md).
 - image upload, image metadata, and image content retrieval
 - detection session persistence and proposal review support
 - recipe import, recommendation ranking, feedback, favorites, hashtags, and pantry follow-through APIs
+- OpenAI-backed pantry assistant generation over grounded recipe candidates
 - storage abstraction for local filesystem and Cloudflare R2
 - startup and recurring cleanup of expired uploaded images
 - pantry-specific YOLO checkpoint loading and detection warmup
@@ -115,6 +116,15 @@ Storage:
 - `R2_SECRET_ACCESS_KEY`
 - `CF_ACCOUNT_ID`
 
+Pantry assistant:
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_ASSISTANT_ENABLED`
+- `OPENAI_ASSISTANT_TIMEOUT_SECONDS`
+- `OPENAI_ASSISTANT_MAX_RECIPES`
+- `OPENAI_ASSISTANT_MAX_PANTRY_ITEMS`
+
 ## Data and Storage Model
 
 The backend intentionally separates:
@@ -161,10 +171,30 @@ Deployment note:
 - pantry-domain fine-tuning improved the same test set to `0.472` mAP@50 and `0.361` mAP@50-95
 - after deploying the fine-tuned checkpoint, Smart Add latency improved to `689.9 ms` p50 / `752.7 ms` p95 on the public Vercel path and `584.7 ms` p50 / `665.6 ms` p95 on the direct backend path
 
+## Pantry Assistant Design
+
+The pantry assistant is intentionally layered on top of the existing deterministic recipe ranking flow instead of replacing it.
+
+The backend flow is:
+
+1. load confirmed pantry inventory
+2. rank recipe candidates with the existing `recommend_recipes()` service
+3. include pantry-age signals such as perishable status and oldest items in stock
+4. send only the top candidate recipes plus compact pantry context to the OpenAI API
+5. return structured JSON that the frontend can render directly
+
+Why this design:
+
+- keeps the assistant grounded in real pantry state and known recipes
+- avoids inventing new recipes or mutating application state
+- keeps cost and latency lower than sending the entire recipe corpus
+- makes the assistant easier to test because the route contract is structured JSON
+
 ## Recipe API Surface
 
 Current routes include:
 
+- `POST /recipes/assistant/use-up`
 - `GET /recipes/recommendations`
 - `GET /recipes/{id}`
 - `POST /recipes/{id}/feedback`
@@ -176,6 +206,8 @@ Current routes include:
 
 Behavior:
 
+- the pantry assistant is advisory only and never writes inventory state
+- older or perishable pantry items are surfaced as an explicit prioritization signal to the assistant
 - recommendations are ranked against confirmed inventory
 - dislikes are excluded from future recommendation pages
 - likes are saved to the favorite recipe book

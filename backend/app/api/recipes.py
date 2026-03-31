@@ -7,6 +7,8 @@ from app.core.security import get_current_user
 from app.db import get_db
 from app.models import User
 from app.schemas import (
+    RecipeAssistantUseUpRead,
+    RecipeAssistantUseUpRequest,
     RecipeBookListResponse,
     RecipeCookApplyRead,
     RecipeCookApplyRequest,
@@ -19,6 +21,7 @@ from app.schemas import (
     RecipeTagUpdateRead,
     RecipeTagUpdateRequest,
 )
+from app.services.llm import RecipeAssistantUnavailableError, RecipeAssistantUpstreamError
 from app.services.recipes import (
     apply_recipe_cook_updates,
     get_recipe_detail,
@@ -29,9 +32,28 @@ from app.services.recipes import (
     set_recipe_tags,
     upsert_recipe_feedback,
 )
+from app.services.recipe_assistant import build_recipe_assistant_response
 
 
 router = APIRouter()
+
+
+@router.post("/assistant/use-up", response_model=RecipeAssistantUseUpRead)
+def use_up_my_pantry_assistant(
+    payload: RecipeAssistantUseUpRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RecipeAssistantUseUpRead:
+    try:
+        return build_recipe_assistant_response(
+            db=db,
+            current_user=current_user,
+            payload=payload,
+        )
+    except RecipeAssistantUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except RecipeAssistantUpstreamError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 @router.get("/recommendations", response_model=RecipeRecommendationListResponse)

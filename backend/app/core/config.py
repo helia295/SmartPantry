@@ -74,6 +74,22 @@ class Settings:
         self.yolo_inference_size: int = int(os.getenv("YOLO_INFERENCE_SIZE", "960"))
         self.yolo_max_image_dim: int = int(os.getenv("YOLO_MAX_IMAGE_DIM", "1600"))
 
+        # OpenAI-backed recipe assistant configuration.
+        self.openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+        self.openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+        self.openai_assistant_enabled: bool = (
+            os.getenv("OPENAI_ASSISTANT_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+        )
+        self.openai_assistant_timeout_seconds: int = int(
+            os.getenv("OPENAI_ASSISTANT_TIMEOUT_SECONDS", "20")
+        )
+        self.openai_assistant_max_recipes: int = int(
+            os.getenv("OPENAI_ASSISTANT_MAX_RECIPES", "5")
+        )
+        self.openai_assistant_max_pantry_items: int = int(
+            os.getenv("OPENAI_ASSISTANT_MAX_PANTRY_ITEMS", "25")
+        )
+
         # Lightweight in-memory rate limiting.
         # This is intended as a practical deployment safeguard for a single-instance app.
         self.auth_rate_limit_requests: int = int(
@@ -127,6 +143,11 @@ class Settings:
         if self.storage_provider == "local":
             warnings.append(
                 "STORAGE_PROVIDER is set to local. Production deployments should usually use object storage such as Cloudflare R2."
+            )
+
+        if self.openai_assistant_enabled and not self.openai_api_key:
+            warnings.append(
+                "OPENAI_ASSISTANT_ENABLED is true but OPENAI_API_KEY is missing. The pantry assistant will be unavailable."
             )
 
         if not self.cors_origins:

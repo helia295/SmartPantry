@@ -62,6 +62,23 @@ type RecipeRecommendationResponse = {
   results: RecipeRecommendation[];
 };
 
+type RecipeAssistantSuggestion = {
+  recipe_id: number;
+  title: string;
+  reason: string;
+  uses_up: string[];
+  missing_ingredients: string[];
+  substitution_ideas: string[];
+  time_note?: string | null;
+};
+
+type RecipeAssistantResponse = {
+  summary: string;
+  strategy_note?: string | null;
+  pantry_items_to_use_first: string[];
+  recipes: RecipeAssistantSuggestion[];
+};
+
 type ImageRecord = {
   id: number;
   user_id: number;
@@ -392,6 +409,11 @@ export default function Home() {
   const [recipePageSize] = useState(10);
   const [recipeTotalPages, setRecipeTotalPages] = useState(0);
   const [recipeTotalResults, setRecipeTotalResults] = useState(0);
+  const [assistantGoal, setAssistantGoal] = useState("");
+  const [assistantMaxTotalMinutes, setAssistantMaxTotalMinutes] = useState("");
+  const [assistantLoading, setAssistantLoading] = useState(false);
+  const [assistantResult, setAssistantResult] = useState<RecipeAssistantResponse | null>(null);
+  const [assistantError, setAssistantError] = useState<string | null>(null);
 
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const libraryInputRef = useRef<HTMLInputElement | null>(null);
@@ -1457,6 +1479,49 @@ export default function Home() {
     );
   }
 
+  async function runRecipeAssistant() {
+    if (!token) {
+      showNotice("recipes", "error", "Log in first.");
+      return;
+    }
+
+    setAssistantLoading(true);
+    setAssistantError(null);
+
+    const payload = {
+      user_goal: assistantGoal.trim() || null,
+      max_total_minutes: assistantMaxTotalMinutes.trim()
+        ? Number(assistantMaxTotalMinutes.trim())
+        : null,
+      main_ingredients: recipeMainIngredients.trim() || null,
+    };
+
+    const res = await fetch(`${API_BASE}/recipes/assistant/use-up`, {
+      method: "POST",
+      headers: authHeaders("application/json"),
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const message = await parseError(res);
+      setAssistantLoading(false);
+      setAssistantError(message);
+      showNotice("recipes", "error", message);
+      return;
+    }
+
+    const response = (await res.json()) as RecipeAssistantResponse;
+    setAssistantResult(response);
+    setAssistantLoading(false);
+    showNotice(
+      "recipes",
+      response.recipes.length > 0 ? "success" : "info",
+      response.recipes.length > 0
+        ? "Sous chef suggestions are ready."
+        : "The assistant needs a little more pantry context before it can narrow things down."
+    );
+  }
+
   async function submitRecipeFeedback(recipeId: number, feedbackType: "like" | "dislike") {
     if (!token) {
       showNotice("recipes", "error", "Log in first.");
@@ -2351,6 +2416,125 @@ export default function Home() {
               <button onClick={() => setShowRecipeFinder((prev) => !prev)}>
                 {showRecipeFinder ? "Hide Filters" : "Find Recipe"}
               </button>
+            </div>
+          </div>
+
+          <div className="recipe-assistant-shell">
+            <div className="recipe-assistant-panel">
+              <div className="recipe-assistant-copy">
+                <p className="eyebrow">Pantry assistant</p>
+                <h3>Let SmartPantry pick the best recipe moves for you.</h3>
+                <p className="muted-text">
+                  Get a short list of recipes that best fit your pantry, your current craving, and the items that have been sitting around the longest.
+                </p>
+                <p className="tiny-text">
+                  Prefer to search on your own instead? The manual Find Recipes controls are still right below.
+                </p>
+              </div>
+
+              <div className="recipe-assistant-controls">
+                <input
+                  value={assistantGoal}
+                  onChange={(e) => setAssistantGoal(e.target.value)}
+                  placeholder="What are you in the mood for? e.g. quick dinner, cozy lunch"
+                />
+                <input
+                  value={assistantMaxTotalMinutes}
+                  onChange={(e) => setAssistantMaxTotalMinutes(e.target.value)}
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="Max minutes (optional)"
+                />
+                <button onClick={() => void runRecipeAssistant()} disabled={assistantLoading}>
+                  {assistantLoading ? "Thinking..." : "Ask SmartPantry"}
+                </button>
+              </div>
+
+              {assistantError && (
+                <div className="app-alert app-alert-error">
+                  <p>{assistantError}</p>
+                </div>
+              )}
+
+              {assistantResult && (
+                <div className="recipe-assistant-results">
+                  <div className="recipe-assistant-summary">
+                    <div>
+                      <span className="section-chip">AI recommendation</span>
+                    </div>
+                    <p>{assistantResult.summary}</p>
+                    {assistantResult.strategy_note && (
+                      <p className="tiny-text">{assistantResult.strategy_note}</p>
+                    )}
+                    {assistantResult.pantry_items_to_use_first.length > 0 && (
+                      <div className="recipe-assistant-pantry-priority">
+                        <span className="tiny-text">Use soon:</span>
+                        {assistantResult.pantry_items_to_use_first.map((item) => (
+                          <span key={item} className="recipe-assistant-pill">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {assistantResult.recipes.length > 0 && (
+                    <div className="recipe-assistant-card-grid">
+                      {assistantResult.recipes.map((suggestion) => (
+                        <article key={suggestion.recipe_id} className="recipe-assistant-card">
+                          <div className="recipe-assistant-card-head">
+                            <div>
+                              <h4>{suggestion.title}</h4>
+                              {suggestion.time_note && (
+                                <p className="tiny-text">{suggestion.time_note}</p>
+                              )}
+                            </div>
+                            <Link href={`/recipes/${suggestion.recipe_id}`} className="header-link-chip">
+                              View recipe
+                            </Link>
+                          </div>
+
+                          <p>{suggestion.reason}</p>
+
+                          {suggestion.uses_up.length > 0 && (
+                            <div className="recipe-assistant-meta-block">
+                              <span className="tiny-text">Helps use up</span>
+                              <div className="recipe-assistant-pill-row">
+                                {suggestion.uses_up.map((item) => (
+                                  <span key={`${suggestion.recipe_id}-use-${item}`} className="recipe-assistant-pill">
+                                    {item}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {suggestion.missing_ingredients.length > 0 && (
+                            <div className="recipe-assistant-meta-block">
+                              <span className="tiny-text">Missing</span>
+                              <p className="tiny-text">
+                                {suggestion.missing_ingredients.join(", ")}
+                              </p>
+                            </div>
+                          )}
+
+                          {suggestion.substitution_ideas.length > 0 && (
+                            <div className="recipe-assistant-meta-block">
+                              <span className="tiny-text">Substitution ideas</span>
+                              <ul className="recipe-assistant-list">
+                                {suggestion.substitution_ideas.map((idea) => (
+                                  <li key={`${suggestion.recipe_id}-idea-${idea}`}>{idea}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
