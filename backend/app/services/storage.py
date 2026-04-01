@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import boto3
-from botocore.config import Config
-
 from app.core.config import get_settings
 
 
@@ -50,6 +47,9 @@ class R2StorageService(StorageService):
         secret_access_key: str,
         bucket_name: str,
     ) -> None:
+        import boto3
+        from botocore.config import Config
+
         self.bucket_name = bucket_name
         self.client = boto3.client(
             "s3",

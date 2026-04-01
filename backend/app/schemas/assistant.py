@@ -26,3 +26,24 @@ class RecipeAssistantUseUpRead(BaseModel):
     strategy_note: Optional[str] = None
     pantry_items_to_use_first: list[str] = []
     recipes: list[RecipeAssistantSuggestionRead] = []
+
+
+class RecipeQuestionAnswerRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=400)
+    max_total_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+
+
+class RecipeQuestionReferenceRead(BaseModel):
+    recipe_id: int
+    title: str
+    reason: str
+    pantry_fit: Optional[str] = None
+    missing_ingredients: list[str] = []
+    time_note: Optional[str] = None
+
+
+class RecipeQuestionAnswerRead(BaseModel):
+    answer: str
+    strategy_note: Optional[str] = None
+    pantry_items_considered: list[str] = []
+    recipes: list[RecipeQuestionReferenceRead] = []

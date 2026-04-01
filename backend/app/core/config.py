@@ -3,11 +3,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-from dotenv import load_dotenv
+_SKIP_DOTENV = os.getenv("SKIP_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}
+if not _SKIP_DOTENV:
+    from dotenv import load_dotenv
 
-
-BACKEND_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(BACKEND_ENV_PATH)
+    BACKEND_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+    load_dotenv(BACKEND_ENV_PATH)
 
 
 def parse_csv_env(raw_value: str) -> List[str]:
@@ -88,6 +89,21 @@ class Settings:
         )
         self.openai_assistant_max_pantry_items: int = int(
             os.getenv("OPENAI_ASSISTANT_MAX_PANTRY_ITEMS", "25")
+        )
+        self.openai_embedding_model: str = os.getenv(
+            "OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
+        )
+        self.openai_rag_enabled: bool = (
+            os.getenv("OPENAI_RAG_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+        )
+        self.openai_rag_timeout_seconds: int = int(
+            os.getenv("OPENAI_RAG_TIMEOUT_SECONDS", "25")
+        )
+        self.openai_rag_max_retrievals: int = int(
+            os.getenv("OPENAI_RAG_MAX_RETRIEVALS", "8")
+        )
+        self.openai_rag_max_context_recipes: int = int(
+            os.getenv("OPENAI_RAG_MAX_CONTEXT_RECIPES", "5")
         )
 
         # Lightweight in-memory rate limiting.

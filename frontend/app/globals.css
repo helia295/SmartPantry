@@ -702,6 +702,8 @@ h3 {
 .recipe-assistant-shell {
   margin-top: 1rem;
   margin-bottom: 1rem;
+  display: grid;
+  gap: 1rem;
 }
 
 .recipe-assistant-panel {
@@ -714,6 +716,13 @@ h3 {
     radial-gradient(circle at top right, rgba(124, 201, 166, 0.2), transparent 24%),
     radial-gradient(circle at bottom left, rgba(255, 214, 154, 0.24), transparent 22%),
     linear-gradient(180deg, rgba(255, 251, 246, 0.96), rgba(255, 245, 235, 0.94));
+}
+
+.recipe-assistant-panel-secondary {
+  background:
+    radial-gradient(circle at top left, rgba(124, 201, 166, 0.16), transparent 24%),
+    radial-gradient(circle at bottom right, rgba(255, 214, 154, 0.22), transparent 22%),
+    linear-gradient(180deg, rgba(255, 252, 248, 0.97), rgba(255, 247, 240, 0.95));
 }
 
 .recipe-assistant-copy {
@@ -730,6 +739,10 @@ h3 {
   grid-template-columns: minmax(0, 1.3fr) minmax(180px, 220px) auto;
   gap: 0.65rem;
   align-items: center;
+}
+
+.recipe-assistant-controls-secondary {
+  grid-template-columns: minmax(0, 1.5fr) minmax(180px, 220px) auto;
 }
 
 .recipe-assistant-options {

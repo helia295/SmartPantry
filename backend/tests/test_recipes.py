@@ -8,6 +8,7 @@ from typing import Optional
 
 import app.api.recipes as recipe_routes
 import app.services.recipe_assistant as recipe_assistant_service
+import app.services.recipe_qa as recipe_qa_service
 from app.db import Base, SessionLocal, engine, ensure_sqlite_schema_compatibility
 from app.main import app
 from app.models import (
@@ -20,9 +21,10 @@ from app.models import (
     RecipeTagLink,
 )
 from app.schemas import RecipeAssistantUseUpRead
-from app.services.llm import RecipeAssistantUpstreamError
+from app.services.llm import RecipeAssistantUpstreamError, RecipeQuestionAnswerUpstreamError
 from app.services.recipe_assistant import build_recipe_assistant_response
-from app.schemas.assistant import RecipeAssistantUseUpRequest
+from app.schemas.assistant import RecipeAssistantUseUpRequest, RecipeQuestionAnswerRead, RecipeQuestionAnswerRequest
+from app.services.recipe_qa import build_recipe_question_answer
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -937,3 +939,134 @@ def test_recipe_assistant_oldest_toggle_only_reorders_perishables(monkeypatch: p
         )
 
     assert result.pantry_items_to_use_first[:3] == ["berries", "spinach", "rice"]
+
+
+@pytest.mark.asyncio
+async def test_recipe_question_answer_route_returns_grounded_results(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def fake_recipe_answer(*, db, current_user, payload):
+        assert payload.question == "What can I make with eggs?"
+        return RecipeQuestionAnswerRead(
+            answer="Egg fried rice is your strongest match.",
+            strategy_note="It uses multiple pantry staples.",
+            pantry_items_considered=["egg", "rice"],
+            recipes=[
+                {
+                    "recipe_id": 123,
+                    "title": "Egg Fried Rice",
+                    "reason": "It matches your question and pantry.",
+                    "pantry_fit": "You already have egg and rice.",
+                    "missing_ingredients": ["soy sauce"],
+                    "time_note": "About 15 minutes total.",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(recipe_routes, "build_recipe_question_answer", fake_recipe_answer)
+
+    res = await client.post(
+        "/recipes/assistant/ask",
+        headers=headers,
+        json={"question": "What can I make with eggs?"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["answer"] == "Egg fried rice is your strongest match."
+    assert body["recipes"][0]["title"] == "Egg Fried Rice"
+
+
+@pytest.mark.asyncio
+async def test_recipe_question_answer_route_surfaces_upstream_failure(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def fake_failure(*, db, current_user, payload):
+        raise RecipeQuestionAnswerUpstreamError("Recipe Q&A timed out.")
+
+    monkeypatch.setattr(recipe_routes, "build_recipe_question_answer", fake_failure)
+
+    res = await client.post(
+        "/recipes/assistant/ask",
+        headers=headers,
+        json={"question": "What can I make with eggs?"},
+    )
+    assert res.status_code == 502
+    assert res.json()["detail"] == "Recipe Q&A timed out."
+
+
+def test_recipe_question_answer_filters_out_non_retrieved_recipe_ids(monkeypatch: pytest.MonkeyPatch):
+    class DummyUser:
+        id = 779
+
+    add_inventory_item_with_metadata(DummyUser.id, "egg", is_perishable=True)
+    add_inventory_item_with_metadata(DummyUser.id, "rice", is_perishable=False)
+
+    allowed_recipe_id = seed_recipe(
+        title="Egg Fried Rice",
+        slug="egg-fried-rice",
+        total_minutes=15,
+        ingredients=["egg", "rice", "soy sauce"],
+    )
+
+    def fake_retrieve_recipe_candidates(*, db, current_user, question, max_total_minutes, limit):
+        return [
+            {
+                "recipe": {
+                    "id": allowed_recipe_id,
+                    "title": "Egg Fried Rice",
+                    "total_minutes": 15,
+                },
+                "document_text": "Egg fried rice with soy sauce.",
+                "similarity": 0.91,
+                "matched_ingredients": ["egg", "rice"],
+                "missing_ingredients": ["soy sauce"],
+                "inventory_match_count": 2,
+            }
+        ]
+
+    def fake_generate_recipe_question_answer(*, prompt_payload):
+        return RecipeQuestionAnswerRead(
+            answer="Egg fried rice is the best option here.",
+            strategy_note="Grounded on the retrieved recipes.",
+            pantry_items_considered=prompt_payload["pantry_items_considered"],
+            recipes=[
+                {
+                    "recipe_id": 999999,
+                    "title": "Invented Recipe",
+                    "reason": "Should be dropped.",
+                    "pantry_fit": None,
+                    "missing_ingredients": [],
+                    "time_note": None,
+                },
+                {
+                    "recipe_id": allowed_recipe_id,
+                    "title": "Egg Fried Rice",
+                    "reason": "It matches the pantry well.",
+                    "pantry_fit": "You already have two of the key ingredients.",
+                    "missing_ingredients": ["soy sauce"],
+                    "time_note": "About 15 minutes total.",
+                },
+            ],
+        )
+
+    monkeypatch.setattr(
+        "app.services.recipe_qa.retrieve_recipe_candidates",
+        fake_retrieve_recipe_candidates,
+    )
+    monkeypatch.setattr(
+        "app.services.recipe_qa.generate_recipe_question_answer",
+        fake_generate_recipe_question_answer,
+    )
+    monkeypatch.setattr(recipe_qa_service.get_settings(), "openai_rag_enabled", True)
+
+    with SessionLocal() as db:
+        result = build_recipe_question_answer(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeQuestionAnswerRequest(question="What can I make with eggs?"),
+        )
+
+    assert len(result.recipes) == 1
+    assert result.recipes[0].recipe_id == allowed_recipe_id

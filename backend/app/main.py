@@ -46,11 +46,19 @@ async def lifespan(_: FastAPI):
     for warning in settings.deployment_warnings():
         logger.warning("Deployment configuration warning: %s", warning)
 
+    logger.info("Startup: creating database tables.")
     Base.metadata.create_all(bind=engine)
+    logger.info("Startup: database tables ready.")
+    logger.info("Startup: ensuring SQLite schema compatibility.")
     ensure_sqlite_schema_compatibility()
+    logger.info("Startup: SQLite schema compatibility complete.")
+    logger.info("Startup: running expired image cleanup.")
     cleanup_expired_images_with_own_session(limit=settings.image_cleanup_batch_limit)
+    logger.info("Startup: expired image cleanup complete.")
     try:
+        logger.info("Startup: preloading detection backend.")
         await asyncio.to_thread(preload_detection_backend)
+        logger.info("Startup: detection backend preload complete.")
     except Exception:
         logger.exception("Detection backend warmup failed; first detection request may be slower.")
 

@@ -79,6 +79,22 @@ type RecipeAssistantResponse = {
   recipes: RecipeAssistantSuggestion[];
 };
 
+type RecipeQuestionReference = {
+  recipe_id: number;
+  title: string;
+  reason: string;
+  pantry_fit?: string | null;
+  missing_ingredients: string[];
+  time_note?: string | null;
+};
+
+type RecipeQuestionAnswerResponse = {
+  answer: string;
+  strategy_note?: string | null;
+  pantry_items_considered: string[];
+  recipes: RecipeQuestionReference[];
+};
+
 type AssistantIngredientOption = {
   value: string;
   label: string;
@@ -422,6 +438,11 @@ export default function Home() {
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantResult, setAssistantResult] = useState<RecipeAssistantResponse | null>(null);
   const [assistantError, setAssistantError] = useState<string | null>(null);
+  const [recipeQuestion, setRecipeQuestion] = useState("");
+  const [recipeQuestionMaxMinutes, setRecipeQuestionMaxMinutes] = useState("");
+  const [recipeQuestionLoading, setRecipeQuestionLoading] = useState(false);
+  const [recipeQuestionResult, setRecipeQuestionResult] = useState<RecipeQuestionAnswerResponse | null>(null);
+  const [recipeQuestionError, setRecipeQuestionError] = useState<string | null>(null);
 
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const libraryInputRef = useRef<HTMLInputElement | null>(null);
@@ -1567,6 +1588,55 @@ export default function Home() {
     setAssistantPrioritizedIngredients((prev) => prev.filter((value) => value !== valueToRemove));
   }
 
+  async function askSmartPantry() {
+    if (!token) {
+      showNotice("recipes", "error", "Log in first.");
+      return;
+    }
+
+    const question = recipeQuestion.trim();
+    if (!question) {
+      setRecipeQuestionError("Enter a question first so SmartPantry knows what to look for.");
+      showNotice("recipes", "error", "Enter a recipe question first.");
+      return;
+    }
+
+    setRecipeQuestionLoading(true);
+    setRecipeQuestionError(null);
+
+    const payload = {
+      question,
+      max_total_minutes: recipeQuestionMaxMinutes.trim()
+        ? Number(recipeQuestionMaxMinutes.trim())
+        : null,
+    };
+
+    const res = await fetch(`${API_BASE}/recipes/assistant/ask`, {
+      method: "POST",
+      headers: authHeaders("application/json"),
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const message = await parseError(res);
+      setRecipeQuestionLoading(false);
+      setRecipeQuestionError(message);
+      showNotice("recipes", "error", message);
+      return;
+    }
+
+    const response = (await res.json()) as RecipeQuestionAnswerResponse;
+    setRecipeQuestionResult(response);
+    setRecipeQuestionLoading(false);
+    showNotice(
+      "recipes",
+      response.recipes.length > 0 ? "success" : "info",
+      response.recipes.length > 0
+        ? "Ask SmartPantry is ready with recipe ideas."
+        : "SmartPantry needs a broader question or more pantry context to answer that well."
+    );
+  }
+
   async function submitRecipeFeedback(recipeId: number, feedbackType: "like" | "dislike") {
     if (!token) {
       showNotice("recipes", "error", "Log in first.");
@@ -2657,6 +2727,102 @@ export default function Home() {
                 </div>
               )}
             </div>
+
+            <div className="recipe-assistant-panel recipe-assistant-panel-secondary">
+              <div className="recipe-assistant-copy">
+                <p className="eyebrow">Ask SmartPantry</p>
+                <h3>Ask a pantry-aware recipe question.</h3>
+                <p className="muted-text">
+                  Ask about any ingredient or recipe idea in plain language and SmartPantry will search our recipe corpus, check your pantry, and explain the best matches.
+                </p>
+                <p className="tiny-text">
+                  This answer flow is grounded in personalized recipe data, so results stay tied to real recipes instead of generic cooking advice.
+                </p>
+              </div>
+
+              <div className="recipe-assistant-controls recipe-assistant-controls-secondary">
+                <input
+                  value={recipeQuestion}
+                  onChange={(e) => setRecipeQuestion(e.target.value)}
+                  placeholder="Ask something like: What can I make with eggs and spinach in under 20 minutes?"
+                />
+                <input
+                  value={recipeQuestionMaxMinutes}
+                  onChange={(e) => setRecipeQuestionMaxMinutes(e.target.value)}
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="Max minutes (optional)"
+                />
+                <button onClick={() => void askSmartPantry()} disabled={recipeQuestionLoading}>
+                  {recipeQuestionLoading ? "Searching..." : "Ask SmartPantry"}
+                </button>
+              </div>
+
+              {recipeQuestionError && (
+                <div className="app-alert app-alert-error">
+                  <p>{recipeQuestionError}</p>
+                </div>
+              )}
+
+              {recipeQuestionResult && (
+                <div className="recipe-assistant-results">
+                  <div className="recipe-assistant-summary">
+                    <div>
+                      <span className="section-chip">Grounded answer</span>
+                    </div>
+                    <p>{recipeQuestionResult.answer}</p>
+                    {recipeQuestionResult.strategy_note && (
+                      <p className="tiny-text">{recipeQuestionResult.strategy_note}</p>
+                    )}
+                    {recipeQuestionResult.pantry_items_considered.length > 0 && (
+                      <div className="recipe-assistant-pantry-priority">
+                        <span className="tiny-text">Pantry context:</span>
+                        {recipeQuestionResult.pantry_items_considered.map((item) => (
+                          <span key={item} className="recipe-assistant-pill">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {recipeQuestionResult.recipes.length > 0 && (
+                    <div className="recipe-assistant-card-grid">
+                      {recipeQuestionResult.recipes.map((recipe) => (
+                        <article key={recipe.recipe_id} className="recipe-assistant-card">
+                          <div className="recipe-assistant-card-head">
+                            <div>
+                              <h4>{recipe.title}</h4>
+                              {recipe.time_note && <p className="tiny-text">{recipe.time_note}</p>}
+                            </div>
+                            <Link href={`/recipes/${recipe.recipe_id}`} className="header-link-chip">
+                              View recipe
+                            </Link>
+                          </div>
+
+                          <p>{recipe.reason}</p>
+
+                          {recipe.pantry_fit && (
+                            <div className="recipe-assistant-meta-block">
+                              <span className="tiny-text">Why it fits</span>
+                              <p className="tiny-text">{recipe.pantry_fit}</p>
+                            </div>
+                          )}
+
+                          {recipe.missing_ingredients.length > 0 && (
+                            <div className="recipe-assistant-meta-block">
+                              <span className="tiny-text">Missing</span>
+                              <p className="tiny-text">{recipe.missing_ingredients.join(", ")}</p>
+                            </div>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {showRecipeFinder && (
@@ -2687,7 +2853,7 @@ export default function Home() {
           )}
 
           <p className="tiny-text">
-            Recipe discovery data courtesy of the MIT-licensed Kaggle All Recipe Dataset, derived from Allrecipes.com content.
+            Recipe discovery data courtesy of the MIT-licensed Kaggle's AllRecipe Dataset, derived from AllRecipes.com content.
           </p>
 
           {renderSectionNotice("recipes")}
