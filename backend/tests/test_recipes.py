@@ -1,10 +1,14 @@
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from typing import Optional
 
+import app.api.recipes as recipe_routes
+import app.services.recipe_assistant as recipe_assistant_service
+import app.services.recipe_qa as recipe_qa_service
 from app.db import Base, SessionLocal, engine, ensure_sqlite_schema_compatibility
 from app.main import app
 from app.models import (
@@ -16,6 +20,11 @@ from app.models import (
     RecipeTag,
     RecipeTagLink,
 )
+from app.schemas import RecipeAssistantUseUpRead
+from app.services.llm import RecipeAssistantUpstreamError, RecipeQuestionAnswerUpstreamError
+from app.services.recipe_assistant import build_recipe_assistant_response
+from app.schemas.assistant import RecipeAssistantUseUpRequest, RecipeQuestionAnswerRead, RecipeQuestionAnswerRequest
+from app.services.recipe_qa import build_recipe_question_answer
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -130,6 +139,28 @@ def add_inventory_item(user_id: int, name: str) -> None:
                 normalized_name=name.strip().lower(),
                 quantity=1.0,
                 unit="count",
+            )
+        )
+        db.commit()
+
+
+def add_inventory_item_with_metadata(
+    user_id: int,
+    name: str,
+    *,
+    is_perishable: bool = False,
+    created_at: Optional[datetime] = None,
+) -> None:
+    with SessionLocal() as db:
+        db.add(
+            InventoryItem(
+                user_id=user_id,
+                name=name,
+                normalized_name=name.strip().lower(),
+                quantity=1.0,
+                unit="count",
+                is_perishable=is_perishable,
+                created_at=created_at,
             )
         )
         db.commit()
@@ -704,3 +735,390 @@ async def test_recommendations_are_paginated_in_pages_of_ten(client: AsyncClient
     second_body = second_page.json()
     assert second_body["page"] == 2
     assert len(second_body["results"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_use_up_my_pantry_assistant_requires_auth(client: AsyncClient):
+    res = await client.post("/recipes/assistant/use-up", json={})
+    assert res.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_use_up_my_pantry_assistant_returns_structured_response(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def fake_assistant_response(**_: object) -> RecipeAssistantUseUpRead:
+        return RecipeAssistantUseUpRead(
+            summary="Start with the soup and the stir fry to use older produce first.",
+            strategy_note="Lean on quick recipes when produce is getting old.",
+            pantry_items_to_use_first=["spinach", "mushroom"],
+            recipes=[
+                {
+                    "recipe_id": 7,
+                    "title": "Mushroom Spinach Soup",
+                    "reason": "It uses your oldest greens and cooks quickly.",
+                    "uses_up": ["spinach", "mushroom"],
+                    "missing_ingredients": ["broth"],
+                    "substitution_ideas": ["Use water plus seasoning if broth is missing."],
+                    "time_note": "About 20 minutes total.",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(recipe_routes, "build_recipe_assistant_response", fake_assistant_response)
+
+    res = await client.post(
+        "/recipes/assistant/use-up",
+        headers=headers,
+        json={"user_goal": "quick dinner", "max_total_minutes": 30},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["summary"].startswith("Start with the soup")
+    assert body["pantry_items_to_use_first"] == ["spinach", "mushroom"]
+    assert body["recipes"][0]["recipe_id"] == 7
+    assert body["recipes"][0]["uses_up"] == ["spinach", "mushroom"]
+
+
+@pytest.mark.asyncio
+async def test_use_up_my_pantry_assistant_handles_upstream_failure(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def fake_failure(**_: object) -> RecipeAssistantUseUpRead:
+        raise RecipeAssistantUpstreamError("The pantry assistant request failed.")
+
+    monkeypatch.setattr(recipe_routes, "build_recipe_assistant_response", fake_failure)
+
+    res = await client.post("/recipes/assistant/use-up", headers=headers, json={})
+    assert res.status_code == 502
+    assert res.json()["detail"] == "The pantry assistant request failed."
+
+
+def test_recipe_assistant_returns_inventory_guidance_without_llm_when_pantry_is_empty():
+    settings = recipe_assistant_service.get_settings()
+    settings.openai_assistant_preview_only = False
+
+    class DummyUser:
+        id = 999
+
+    with SessionLocal() as db:
+        result = build_recipe_assistant_response(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeAssistantUseUpRequest(user_goal="easy dinner"),
+        )
+    assert result.recipes == []
+    assert "Add a few pantry items first" in result.summary
+
+
+def test_recipe_assistant_can_prioritize_selected_ingredients_without_oldest_bias(monkeypatch: pytest.MonkeyPatch):
+    settings = recipe_assistant_service.get_settings()
+    monkeypatch.setattr(settings, "openai_assistant_preview_only", False)
+
+    class DummyUser:
+        id = 777
+
+    add_inventory_item_with_metadata(DummyUser.id, "apple", is_perishable=False)
+    add_inventory_item_with_metadata(DummyUser.id, "spinach", is_perishable=True)
+
+    apple_recipe_id = seed_recipe(
+        title="Apple Oat Bowl",
+        slug="apple-oat-bowl",
+        total_minutes=10,
+        ingredients=["apple", "oats"],
+    )
+    seed_recipe(
+        title="Spinach Eggs",
+        slug="spinach-eggs",
+        total_minutes=12,
+        ingredients=["spinach", "egg"],
+    )
+
+    def fake_generate_recipe_assistant_plan(*, prompt_payload):
+        assert prompt_payload["user_request"]["prioritize_oldest_items"] is False
+        assert prompt_payload["user_request"]["prioritized_ingredients"] == ["apple"]
+        assert prompt_payload["pantry_items_to_use_first"][0].lower() == "apple"
+        return RecipeAssistantUseUpRead(
+            summary="Start with the apple bowl.",
+            strategy_note="You asked to prioritize apple specifically.",
+            pantry_items_to_use_first=prompt_payload["pantry_items_to_use_first"],
+            recipes=[
+                {
+                    "recipe_id": apple_recipe_id,
+                    "title": "Apple Oat Bowl",
+                    "reason": "It directly uses the ingredient you selected.",
+                    "uses_up": ["apple"],
+                    "missing_ingredients": [],
+                    "substitution_ideas": [],
+                    "time_note": "About 10 minutes total.",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(
+        recipe_assistant_service,
+        "generate_recipe_assistant_plan",
+        fake_generate_recipe_assistant_plan,
+    )
+
+    with SessionLocal() as db:
+        result = build_recipe_assistant_response(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeAssistantUseUpRequest(
+                user_goal="quick breakfast",
+                prioritize_oldest_items=False,
+                prioritized_ingredients=["apple"],
+            ),
+        )
+
+    assert result.pantry_items_to_use_first[0].lower() == "apple"
+    assert result.summary == "Start with the apple bowl."
+
+
+def test_recipe_assistant_oldest_toggle_only_reorders_perishables(monkeypatch: pytest.MonkeyPatch):
+    settings = recipe_assistant_service.get_settings()
+    monkeypatch.setattr(settings, "openai_assistant_preview_only", False)
+
+    class DummyUser:
+        id = 778
+
+    now = datetime.now(timezone.utc)
+    add_inventory_item_with_metadata(
+        DummyUser.id,
+        "rice",
+        is_perishable=False,
+        created_at=now - timedelta(days=30),
+    )
+    add_inventory_item_with_metadata(
+        DummyUser.id,
+        "spinach",
+        is_perishable=True,
+        created_at=now - timedelta(days=2),
+    )
+    add_inventory_item_with_metadata(
+        DummyUser.id,
+        "berries",
+        is_perishable=True,
+        created_at=now - timedelta(days=6),
+    )
+
+    recipe_id = seed_recipe(
+        title="Berry Spinach Bowl",
+        slug="berry-spinach-bowl",
+        total_minutes=12,
+        ingredients=["berries", "spinach", "yogurt"],
+    )
+
+    def fake_generate_recipe_assistant_plan(*, prompt_payload):
+        assert prompt_payload["pantry_items_to_use_first"][:3] == ["berries", "spinach", "rice"]
+        return RecipeAssistantUseUpRead(
+            summary="Use the older berries first.",
+            strategy_note="Perishable items should rise above shelf-stable pantry goods.",
+            pantry_items_to_use_first=prompt_payload["pantry_items_to_use_first"],
+            recipes=[
+                {
+                    "recipe_id": recipe_id,
+                    "title": "Berry Spinach Bowl",
+                    "reason": "It uses the older perishables first.",
+                    "uses_up": ["berries", "spinach"],
+                    "missing_ingredients": ["yogurt"],
+                    "substitution_ideas": [],
+                    "time_note": "About 12 minutes total.",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(
+        recipe_assistant_service,
+        "generate_recipe_assistant_plan",
+        fake_generate_recipe_assistant_plan,
+    )
+
+    with SessionLocal() as db:
+        result = build_recipe_assistant_response(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeAssistantUseUpRequest(
+                user_goal="light breakfast",
+                prioritize_oldest_items=True,
+            ),
+        )
+
+    assert result.pantry_items_to_use_first[:3] == ["berries", "spinach", "rice"]
+
+
+@pytest.mark.asyncio
+async def test_recipe_question_answer_route_returns_grounded_results(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def fake_recipe_answer(*, db, current_user, payload):
+        assert payload.question == "What can I make with eggs?"
+        return RecipeQuestionAnswerRead(
+            answer="Egg fried rice is your strongest match.",
+            strategy_note="It uses multiple pantry staples.",
+            pantry_items_considered=["egg", "rice"],
+            recipes=[
+                {
+                    "recipe_id": 123,
+                    "title": "Egg Fried Rice",
+                    "reason": "It matches your question and pantry.",
+                    "pantry_fit": "You already have egg and rice.",
+                    "missing_ingredients": ["soy sauce"],
+                    "time_note": "About 15 minutes total.",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(recipe_routes, "build_recipe_question_answer", fake_recipe_answer)
+
+    res = await client.post(
+        "/recipes/assistant/ask",
+        headers=headers,
+        json={"question": "What can I make with eggs?"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["answer"] == "Egg fried rice is your strongest match."
+    assert body["recipes"][0]["title"] == "Egg Fried Rice"
+
+
+@pytest.mark.asyncio
+async def test_recipe_question_answer_route_surfaces_upstream_failure(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def fake_failure(*, db, current_user, payload):
+        raise RecipeQuestionAnswerUpstreamError("Recipe Q&A timed out.")
+
+    monkeypatch.setattr(recipe_routes, "build_recipe_question_answer", fake_failure)
+
+    res = await client.post(
+        "/recipes/assistant/ask",
+        headers=headers,
+        json={"question": "What can I make with eggs?"},
+    )
+    assert res.status_code == 502
+    assert res.json()["detail"] == "Recipe Q&A timed out."
+
+
+def test_recipe_question_answer_filters_out_non_retrieved_recipe_ids(monkeypatch: pytest.MonkeyPatch):
+    settings = recipe_qa_service.get_settings()
+    monkeypatch.setattr(settings, "openai_rag_preview_only", False)
+
+    class DummyUser:
+        id = 779
+
+    add_inventory_item_with_metadata(DummyUser.id, "egg", is_perishable=True)
+    add_inventory_item_with_metadata(DummyUser.id, "rice", is_perishable=False)
+
+    allowed_recipe_id = seed_recipe(
+        title="Egg Fried Rice",
+        slug="egg-fried-rice",
+        total_minutes=15,
+        ingredients=["egg", "rice", "soy sauce"],
+    )
+
+    def fake_retrieve_recipe_candidates(*, db, current_user, question, max_total_minutes, limit):
+        return [
+            {
+                "recipe": {
+                    "id": allowed_recipe_id,
+                    "title": "Egg Fried Rice",
+                    "total_minutes": 15,
+                },
+                "document_text": "Egg fried rice with soy sauce.",
+                "similarity": 0.91,
+                "matched_ingredients": ["egg", "rice"],
+                "missing_ingredients": ["soy sauce"],
+                "inventory_match_count": 2,
+            }
+        ]
+
+    def fake_generate_recipe_question_answer(*, prompt_payload):
+        return RecipeQuestionAnswerRead(
+            answer="Egg fried rice is the best option here.",
+            strategy_note="Grounded on the retrieved recipes.",
+            pantry_items_considered=prompt_payload["pantry_items_considered"],
+            recipes=[
+                {
+                    "recipe_id": 999999,
+                    "title": "Invented Recipe",
+                    "reason": "Should be dropped.",
+                    "pantry_fit": None,
+                    "missing_ingredients": [],
+                    "time_note": None,
+                },
+                {
+                    "recipe_id": allowed_recipe_id,
+                    "title": "Egg Fried Rice",
+                    "reason": "It matches the pantry well.",
+                    "pantry_fit": "You already have two of the key ingredients.",
+                    "missing_ingredients": ["soy sauce"],
+                    "time_note": "About 15 minutes total.",
+                },
+            ],
+        )
+
+    monkeypatch.setattr(
+        "app.services.recipe_qa.retrieve_recipe_candidates",
+        fake_retrieve_recipe_candidates,
+    )
+    monkeypatch.setattr(
+        "app.services.recipe_qa.generate_recipe_question_answer",
+        fake_generate_recipe_question_answer,
+    )
+    monkeypatch.setattr(settings, "openai_rag_enabled", True)
+
+    with SessionLocal() as db:
+        result = build_recipe_question_answer(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeQuestionAnswerRequest(question="What can I make with eggs?"),
+        )
+
+    assert len(result.recipes) == 1
+    assert result.recipes[0].recipe_id == allowed_recipe_id
+
+
+def test_recipe_assistant_preview_mode_returns_structured_shell(monkeypatch: pytest.MonkeyPatch):
+    settings = recipe_assistant_service.get_settings()
+    monkeypatch.setattr(settings, "openai_assistant_preview_only", True)
+    monkeypatch.setattr(settings, "openai_features_repo_url", "https://github.com/example/repo")
+
+    class DummyUser:
+        id = 780
+
+    with SessionLocal() as db:
+        result = build_recipe_assistant_response(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeAssistantUseUpRequest(user_goal="quick lunch"),
+        )
+
+    assert result.mode == "preview"
+    assert result.recipes == []
+    assert result.cta_url == "https://github.com/example/repo"
+
+
+def test_recipe_question_answer_preview_mode_returns_structured_shell(monkeypatch: pytest.MonkeyPatch):
+    settings = recipe_qa_service.get_settings()
+    monkeypatch.setattr(settings, "openai_rag_preview_only", True)
+    monkeypatch.setattr(settings, "openai_features_repo_url", "https://github.com/example/repo")
+
+    class DummyUser:
+        id = 781
+
+    with SessionLocal() as db:
+        result = build_recipe_question_answer(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeQuestionAnswerRequest(question="What can I make with eggs?"),
+        )
+
+    assert result.mode == "preview"
+    assert result.recipes == []
+    assert result.cta_url == "https://github.com/example/repo"

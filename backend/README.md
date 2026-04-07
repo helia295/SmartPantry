@@ -12,9 +12,27 @@ For the product-level overview, see the repo root [README](../README.md).
 - image upload, image metadata, and image content retrieval
 - detection session persistence and proposal review support
 - recipe import, recommendation ranking, feedback, favorites, hashtags, and pantry follow-through APIs
+- OpenAI-backed pantry assistant generation over grounded recipe candidates
+- recipe embeddings, retrieval, and grounded recipe question-answering infrastructure
 - storage abstraction for local filesystem and Cloudflare R2
 - startup and recurring cleanup of expired uploaded images
 - pantry-specific YOLO checkpoint loading and detection warmup
+
+## Current Milestones
+
+### Pantry assistant milestone
+
+- deterministic recipe ranking remains the first-stage candidate generator
+- OpenAI is used as a grounded explanation and prioritization layer rather than a replacement for core application logic
+- user controls include mood/request text, optional time constraint, explicit ingredient priorities, and older-perishable prioritization
+
+### Ask SmartPantry RAG milestone
+
+- recipe embeddings are stored in the database for retrieval
+- query-time retrieval is pantry-aware and reranked before generation
+- generated answers are filtered so only retrieved recipe IDs survive
+- the v1 retrieval design uses one embedding document per recipe to keep indexing, debugging, and rollout simpler
+- preview mode can expose the UX shell safely on a public deployment without triggering paid OpenAI traffic
 
 ## Backend Structure
 
@@ -67,6 +85,11 @@ cd backend
 docker build -t smartpantry-backend .
 ```
 
+Deployment note:
+
+- the Dockerfile is tuned for a CPU deployment target and installs PyTorch from the CPU wheel index
+- this avoids pulling unnecessary CUDA/NVIDIA packages into the EC2 image build
+
 Run locally:
 
 ```bash
@@ -115,6 +138,23 @@ Storage:
 - `R2_SECRET_ACCESS_KEY`
 - `CF_ACCOUNT_ID`
 
+Pantry assistant:
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_ASSISTANT_ENABLED`
+- `OPENAI_ASSISTANT_PREVIEW_ONLY`
+- `OPENAI_ASSISTANT_TIMEOUT_SECONDS`
+- `OPENAI_ASSISTANT_MAX_RECIPES`
+- `OPENAI_ASSISTANT_MAX_PANTRY_ITEMS`
+- `OPENAI_EMBEDDING_MODEL`
+- `OPENAI_RAG_ENABLED`
+- `OPENAI_RAG_PREVIEW_ONLY`
+- `OPENAI_RAG_TIMEOUT_SECONDS`
+- `OPENAI_RAG_MAX_RETRIEVALS`
+- `OPENAI_RAG_MAX_CONTEXT_RECIPES`
+- `OPENAI_FEATURES_REPO_URL`
+
 ## Data and Storage Model
 
 The backend intentionally separates:
@@ -161,10 +201,53 @@ Deployment note:
 - pantry-domain fine-tuning improved the same test set to `0.472` mAP@50 and `0.361` mAP@50-95
 - after deploying the fine-tuned checkpoint, Smart Add latency improved to `689.9 ms` p50 / `752.7 ms` p95 on the public Vercel path and `584.7 ms` p50 / `665.6 ms` p95 on the direct backend path
 
+## Pantry Assistant Design
+
+The pantry assistant is intentionally layered on top of the existing deterministic recipe ranking flow instead of replacing it.
+
+The backend flow is:
+
+1. load confirmed pantry inventory
+2. rank recipe candidates with the existing `recommend_recipes()` service
+3. include pantry-age signals such as perishable status and older perishables in stock
+4. optionally boost user-selected pantry ingredients and optional age-based prioritization choices
+5. send only the top candidate recipes plus compact pantry context to the OpenAI API
+6. return structured JSON that the frontend can render directly
+
+Why this design:
+
+- keeps the assistant grounded in real pantry state and known recipes
+- avoids inventing new recipes or mutating application state
+- keeps cost and latency lower than sending the entire recipe corpus
+- makes the assistant easier to test because the route contract is structured JSON
+- allows a backend-controlled preview mode for public deployments that should show the workflow without spending live API credits
+
+## Ask SmartPantry RAG Design
+
+The Ask SmartPantry flow is the second-stage LLM feature in the app.
+
+The backend flow is:
+
+1. embed the user question with the OpenAI embeddings model
+2. retrieve semantically relevant recipe documents from `recipe_embeddings`
+3. rerank retrieved recipes with pantry overlap, missing-ingredient penalties, and optional time constraints
+4. pass only the top grounded candidates plus compact pantry context to the generation model
+5. validate the generated output and drop any recipe references that were not in the retrieved set
+
+Why this design:
+
+- retrieval quality can be debugged independently from generation quality
+- the model answers over recipe evidence rather than generic cooking knowledge
+- pantry-aware reranking keeps the feature aligned with the existing SmartPantry product loop
+- output filtering reduces hallucination risk and makes the response safer to render directly in the UI
+- preview mode can keep the public UX coherent even when the live generation path is intentionally disabled
+
 ## Recipe API Surface
 
 Current routes include:
 
+- `POST /recipes/assistant/use-up`
+- `POST /recipes/assistant/ask`
 - `GET /recipes/recommendations`
 - `GET /recipes/{id}`
 - `POST /recipes/{id}/feedback`
@@ -176,11 +259,36 @@ Current routes include:
 
 Behavior:
 
+- the pantry assistant is advisory only and never writes inventory state
+- recipe Q&A is grounded on embedded recipe documents plus pantry-aware reranking before generation
+- older perishable pantry items can be surfaced as an explicit prioritization signal to the assistant
+- users can also explicitly prioritize specific pantry ingredients from the UI, and those ingredients are used both for candidate ranking bias and assistant guidance
 - recommendations are ranked against confirmed inventory
 - dislikes are excluded from future recommendation pages
 - likes are saved to the favorite recipe book
 - hashtags organize favorites without introducing heavier collection management
 - pantry follow-through remains conservative and explicitly reviewed
+
+## Retrieval and Embedding Workflow
+
+The Ask SmartPantry groundwork uses a simple one-document-per-recipe retrieval design for v1.
+
+Backend pieces:
+
+- `recipe_embeddings` table stores one embedding row per recipe
+- `index_recipe_embeddings.py` builds recipe documents and writes embeddings
+- retrieval first searches embedded recipe documents, then reranks with pantry overlap
+- the LLM only sees the top grounded recipe candidates rather than the full recipe corpus
+
+This keeps the first RAG version easier to reason about, cheaper to run, and consistent with the grounded design used for the pantry assistant.
+
+How to evaluate the RAG path in practice:
+
+- indexing: verify document counts, document text quality, and successful upserts into `recipe_embeddings`
+- retrieval: inspect top-k candidates for a small golden query set before judging the final LLM answer
+- groundedness: verify the answer never references recipe IDs outside the retrieved set
+- usefulness: check whether answers are materially better than deterministic recommendation alone for natural-language questions
+- reliability: measure latency, timeout rate, and failure behavior, especially for empty or weak retrievals
 
 ## Deployment Posture
 
@@ -202,6 +310,12 @@ Why this deployment shape:
 - avoids exposing backend secrets to the browser
 - allows the backend to mount a host-side model artifact into `/app/models` without baking large binaries into git
 
+Current public-demo posture:
+
+- the public deployment can run both AI recipe surfaces in preview mode
+- preview mode keeps the UI visible and explains how to self-host the real feature
+- the manual `Find Recipe` path remains available even when live AI is disabled
+
 ## Testing
 
 Run backend tests:
@@ -222,3 +336,5 @@ Important note:
 - current rate limiting is in-memory rather than distributed
 - no custom backend domain yet
 - detection still runs inline rather than via a dedicated worker or queue
+- Ask SmartPantry still needs a production rollout checklist: migration on Neon, embedding indexing against the deployed recipe dataset, backend env updates, and post-deploy smoke testing
+- the migration-first rollout is not fully enforced yet because startup `create_all()` remains enabled as a transitional safety net

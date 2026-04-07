@@ -3,11 +3,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-from dotenv import load_dotenv
+_SKIP_DOTENV = os.getenv("SKIP_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}
+if not _SKIP_DOTENV:
+    from dotenv import load_dotenv
 
-
-BACKEND_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(BACKEND_ENV_PATH)
+    BACKEND_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+    load_dotenv(BACKEND_ENV_PATH)
 
 
 def parse_csv_env(raw_value: str) -> List[str]:
@@ -74,6 +75,49 @@ class Settings:
         self.yolo_inference_size: int = int(os.getenv("YOLO_INFERENCE_SIZE", "960"))
         self.yolo_max_image_dim: int = int(os.getenv("YOLO_MAX_IMAGE_DIM", "1600"))
 
+        # OpenAI-backed recipe assistant configuration.
+        self.openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+        self.openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+        self.openai_assistant_enabled: bool = (
+            os.getenv("OPENAI_ASSISTANT_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+        )
+        self.openai_assistant_preview_only: bool = (
+            os.getenv("OPENAI_ASSISTANT_PREVIEW_ONLY", "false").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+        self.openai_assistant_timeout_seconds: int = int(
+            os.getenv("OPENAI_ASSISTANT_TIMEOUT_SECONDS", "20")
+        )
+        self.openai_assistant_max_recipes: int = int(
+            os.getenv("OPENAI_ASSISTANT_MAX_RECIPES", "5")
+        )
+        self.openai_assistant_max_pantry_items: int = int(
+            os.getenv("OPENAI_ASSISTANT_MAX_PANTRY_ITEMS", "25")
+        )
+        self.openai_embedding_model: str = os.getenv(
+            "OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
+        )
+        self.openai_rag_enabled: bool = (
+            os.getenv("OPENAI_RAG_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+        )
+        self.openai_rag_preview_only: bool = (
+            os.getenv("OPENAI_RAG_PREVIEW_ONLY", "false").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+        self.openai_rag_timeout_seconds: int = int(
+            os.getenv("OPENAI_RAG_TIMEOUT_SECONDS", "25")
+        )
+        self.openai_rag_max_retrievals: int = int(
+            os.getenv("OPENAI_RAG_MAX_RETRIEVALS", "8")
+        )
+        self.openai_rag_max_context_recipes: int = int(
+            os.getenv("OPENAI_RAG_MAX_CONTEXT_RECIPES", "5")
+        )
+        self.openai_features_repo_url: str = os.getenv(
+            "OPENAI_FEATURES_REPO_URL",
+            "https://github.com/heliadinh/SmartPantry",
+        )
+
         # Lightweight in-memory rate limiting.
         # This is intended as a practical deployment safeguard for a single-instance app.
         self.auth_rate_limit_requests: int = int(
@@ -127,6 +171,11 @@ class Settings:
         if self.storage_provider == "local":
             warnings.append(
                 "STORAGE_PROVIDER is set to local. Production deployments should usually use object storage such as Cloudflare R2."
+            )
+
+        if (self.openai_assistant_enabled or self.openai_rag_enabled) and not self.openai_api_key:
+            warnings.append(
+                "OpenAI-backed features are enabled but OPENAI_API_KEY is missing. Assistant routes will be unavailable unless preview mode is enabled."
             )
 
         if not self.cors_origins:
