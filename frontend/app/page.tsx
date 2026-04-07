@@ -73,8 +73,12 @@ type RecipeAssistantSuggestion = {
 };
 
 type RecipeAssistantResponse = {
+  mode?: string;
   summary: string;
   strategy_note?: string | null;
+  availability_note?: string | null;
+  cta_label?: string | null;
+  cta_url?: string | null;
   pantry_items_to_use_first: string[];
   recipes: RecipeAssistantSuggestion[];
 };
@@ -89,8 +93,12 @@ type RecipeQuestionReference = {
 };
 
 type RecipeQuestionAnswerResponse = {
+  mode?: string;
   answer: string;
   strategy_note?: string | null;
+  availability_note?: string | null;
+  cta_label?: string | null;
+  cta_url?: string | null;
   pantry_items_considered: string[];
   recipes: RecipeQuestionReference[];
 };
@@ -443,6 +451,9 @@ export default function Home() {
   const [recipeQuestionLoading, setRecipeQuestionLoading] = useState(false);
   const [recipeQuestionResult, setRecipeQuestionResult] = useState<RecipeQuestionAnswerResponse | null>(null);
   const [recipeQuestionError, setRecipeQuestionError] = useState<string | null>(null);
+  const [activeRecipeIntelligencePanel, setActiveRecipeIntelligencePanel] = useState<
+    "assistant" | "question" | null
+  >(null);
 
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const libraryInputRef = useRef<HTMLInputElement | null>(null);
@@ -1588,6 +1599,20 @@ export default function Home() {
     setAssistantPrioritizedIngredients((prev) => prev.filter((value) => value !== valueToRemove));
   }
 
+  function clearRecipeIntelligencePanels() {
+    setAssistantResult(null);
+    setAssistantError(null);
+    setRecipeQuestionResult(null);
+    setRecipeQuestionError(null);
+    setAssistantIngredientPickerOpen(false);
+    setActiveRecipeIntelligencePanel(null);
+  }
+
+  function toggleRecipeFinder() {
+    clearRecipeIntelligencePanels();
+    setShowRecipeFinder((prev) => !prev);
+  }
+
   async function askSmartPantry() {
     if (!token) {
       showNotice("recipes", "error", "Log in first.");
@@ -2534,42 +2559,79 @@ export default function Home() {
             </div>
             <div className="row-gap">
               <Link href="/recipes/book">Favorite Recipes</Link>
-              <button onClick={() => setShowRecipeFinder((prev) => !prev)}>
+              <button onClick={toggleRecipeFinder}>
                 {showRecipeFinder ? "Hide Filters" : "Find Recipe"}
               </button>
             </div>
           </div>
 
-          <div className="recipe-assistant-shell">
-            <div className="recipe-assistant-panel">
-              <div className="recipe-assistant-copy">
-                <p className="eyebrow">SmartPantry assistant</p>
-                <h3>Let SmartPantry build a recipe shortlist for you.</h3>
+            <div className="recipe-assistant-shell">
+            <div className="recipe-intelligence-head">
+              <div>
+                <p className="eyebrow">Recipe intelligence</p>
+                <h3>Choose between guided planning and grounded recipe Q&amp;A.</h3>
                 <p className="muted-text">
-                  Get quick recipe suggestions based on what you already have, what sounds good right now, and the ingredients you want to use first.
-                </p>
-                <p className="tiny-text">
-                  Want to browse manually instead? Use the Find Recipe controls above anytime.
+                  Use the planner when you want a short pantry-aware shortlist. Use Ask SmartPantry when you want to ask about any recipe or ingredient in plain language.
                 </p>
               </div>
+              <button
+                type="button"
+                className="recipe-intelligence-reset"
+                onClick={clearRecipeIntelligencePanels}
+              >
+                Clear AI panels
+              </button>
+            </div>
 
-              <div className="recipe-assistant-controls">
-                <input
-                  value={assistantGoal}
-                  onChange={(e) => setAssistantGoal(e.target.value)}
-                  placeholder="What are you in the mood for? e.g. quick dinner, light lunch"
-                />
-                <input
-                  value={assistantMaxTotalMinutes}
-                  onChange={(e) => setAssistantMaxTotalMinutes(e.target.value)}
-                  type="number"
-                  min="1"
-                  step="1"
-                  placeholder="Max minutes (optional)"
-                />
-                <button onClick={() => void runRecipeAssistant()} disabled={assistantLoading}>
-                  {assistantLoading ? "Thinking..." : "Get suggestions"}
+            <div className="recipe-intelligence-grid">
+            <div
+              className={`recipe-assistant-panel${
+                activeRecipeIntelligencePanel === "assistant" ? " recipe-assistant-panel-active" : ""
+              }`}
+            >
+              <div className="recipe-assistant-copy">
+                <p className="eyebrow">SmartPantry assistant</p>
+                <div className="recipe-assistant-heading-row">
+                  <h3>Build me a shortlist</h3>
+                  <span className="section-chip">Planner</span>
+                </div>
+                <p className="muted-text">
+                  Best when you want a few pantry-aware recipe options without writing a long question.
+                </p>
+                <button
+                  type="button"
+                  className="recipe-assistant-inline-toggle"
+                  onClick={() =>
+                    setActiveRecipeIntelligencePanel((prev) => (prev === "assistant" ? null : "assistant"))
+                  }
+                >
+                  {activeRecipeIntelligencePanel === "assistant" ? "Hide planner" : "Open planner"}
                 </button>
+              </div>
+
+              {activeRecipeIntelligencePanel === "assistant" && (
+              <>
+              <div className="recipe-assistant-controls">
+                <div className="recipe-assistant-primary-row">
+                  <input
+                    value={assistantGoal}
+                    onChange={(e) => setAssistantGoal(e.target.value)}
+                    placeholder="What sounds good? e.g. quick dinner"
+                  />
+                </div>
+                <div className="recipe-assistant-secondary-row">
+                  <input
+                    value={assistantMaxTotalMinutes}
+                    onChange={(e) => setAssistantMaxTotalMinutes(e.target.value)}
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="Max minutes (optional)"
+                  />
+                  <button onClick={() => void runRecipeAssistant()} disabled={assistantLoading}>
+                    {assistantLoading ? "Thinking..." : "Get suggestions"}
+                  </button>
+                </div>
               </div>
 
               <div className="recipe-assistant-options">
@@ -2650,13 +2712,30 @@ export default function Home() {
 
               {assistantResult && (
                 <div className="recipe-assistant-results">
-                  <div className="recipe-assistant-summary">
+                  <div className={`recipe-assistant-summary${assistantResult.mode === "preview" ? " recipe-assistant-summary-preview" : ""}`}>
                     <div>
-                      <span className="section-chip">AI recommendation</span>
+                      <span className="section-chip">
+                        {assistantResult.mode === "preview" ? "Preview mode" : "AI recommendation"}
+                      </span>
                     </div>
                     <p>{assistantResult.summary}</p>
                     {assistantResult.strategy_note && (
                       <p className="tiny-text">{assistantResult.strategy_note}</p>
+                    )}
+                    {assistantResult.availability_note && (
+                      <p className="tiny-text recipe-assistant-preview-note">{assistantResult.availability_note}</p>
+                    )}
+                    {assistantResult.cta_url && assistantResult.cta_label && (
+                      <div className="recipe-assistant-preview-actions">
+                        <a
+                          href={assistantResult.cta_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="header-link-chip"
+                        >
+                          {assistantResult.cta_label}
+                        </a>
+                      </div>
                     )}
                     {assistantResult.pantry_items_to_use_first.length > 0 && (
                       <div className="recipe-assistant-pantry-priority">
@@ -2726,37 +2805,58 @@ export default function Home() {
                   )}
                 </div>
               )}
+              </>
+              )}
             </div>
 
-            <div className="recipe-assistant-panel recipe-assistant-panel-secondary">
+            <div
+              className={`recipe-assistant-panel recipe-assistant-panel-secondary${
+                activeRecipeIntelligencePanel === "question" ? " recipe-assistant-panel-active" : ""
+              }`}
+            >
               <div className="recipe-assistant-copy">
                 <p className="eyebrow">Ask SmartPantry</p>
-                <h3>Ask a pantry-aware recipe question.</h3>
+                <div className="recipe-assistant-heading-row">
+                  <h3>Ask a recipe question</h3>
+                  <span className="section-chip">Grounded Q&amp;A</span>
+                </div>
                 <p className="muted-text">
-                  Ask about any ingredient or recipe idea in plain language and SmartPantry will search our recipe corpus, check your pantry, and explain the best matches.
+                  Best when you want to ask something specific, like an ingredient combination, time limit, or meal idea.
                 </p>
-                <p className="tiny-text">
-                  This answer flow is grounded in personalized recipe data, so results stay tied to real recipes instead of generic cooking advice.
-                </p>
+                <button
+                  type="button"
+                  className="recipe-assistant-inline-toggle"
+                  onClick={() =>
+                    setActiveRecipeIntelligencePanel((prev) => (prev === "question" ? null : "question"))
+                  }
+                >
+                  {activeRecipeIntelligencePanel === "question" ? "Hide Q&A" : "Open Q&A"}
+                </button>
               </div>
 
+              {activeRecipeIntelligencePanel === "question" && (
+              <>
               <div className="recipe-assistant-controls recipe-assistant-controls-secondary">
-                <input
-                  value={recipeQuestion}
-                  onChange={(e) => setRecipeQuestion(e.target.value)}
-                  placeholder="Ask something like: What can I make with eggs and spinach in under 20 minutes?"
-                />
-                <input
-                  value={recipeQuestionMaxMinutes}
-                  onChange={(e) => setRecipeQuestionMaxMinutes(e.target.value)}
-                  type="number"
-                  min="1"
-                  step="1"
-                  placeholder="Max minutes (optional)"
-                />
-                <button onClick={() => void askSmartPantry()} disabled={recipeQuestionLoading}>
-                  {recipeQuestionLoading ? "Searching..." : "Ask SmartPantry"}
-                </button>
+                <div className="recipe-assistant-primary-row">
+                  <input
+                    value={recipeQuestion}
+                    onChange={(e) => setRecipeQuestion(e.target.value)}
+                    placeholder="Ask about any ingredients, timing, or meal ideas"
+                  />
+                </div>
+                <div className="recipe-assistant-secondary-row">
+                  <input
+                    value={recipeQuestionMaxMinutes}
+                    onChange={(e) => setRecipeQuestionMaxMinutes(e.target.value)}
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="Max minutes (optional)"
+                  />
+                  <button onClick={() => void askSmartPantry()} disabled={recipeQuestionLoading}>
+                    {recipeQuestionLoading ? "Searching..." : "Ask SmartPantry"}
+                  </button>
+                </div>
               </div>
 
               {recipeQuestionError && (
@@ -2767,13 +2867,30 @@ export default function Home() {
 
               {recipeQuestionResult && (
                 <div className="recipe-assistant-results">
-                  <div className="recipe-assistant-summary">
+                  <div className={`recipe-assistant-summary${recipeQuestionResult.mode === "preview" ? " recipe-assistant-summary-preview" : ""}`}>
                     <div>
-                      <span className="section-chip">Grounded answer</span>
+                      <span className="section-chip">
+                        {recipeQuestionResult.mode === "preview" ? "Preview mode" : "Grounded answer"}
+                      </span>
                     </div>
                     <p>{recipeQuestionResult.answer}</p>
                     {recipeQuestionResult.strategy_note && (
                       <p className="tiny-text">{recipeQuestionResult.strategy_note}</p>
+                    )}
+                    {recipeQuestionResult.availability_note && (
+                      <p className="tiny-text recipe-assistant-preview-note">{recipeQuestionResult.availability_note}</p>
+                    )}
+                    {recipeQuestionResult.cta_url && recipeQuestionResult.cta_label && (
+                      <div className="recipe-assistant-preview-actions">
+                        <a
+                          href={recipeQuestionResult.cta_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="header-link-chip"
+                        >
+                          {recipeQuestionResult.cta_label}
+                        </a>
+                      </div>
                     )}
                     {recipeQuestionResult.pantry_items_considered.length > 0 && (
                       <div className="recipe-assistant-pantry-priority">
@@ -2822,6 +2939,9 @@ export default function Home() {
                   )}
                 </div>
               )}
+              </>
+              )}
+            </div>
             </div>
           </div>
 

@@ -19,7 +19,10 @@ COPY alembic /app/alembic
 COPY app /app/app
 
 RUN python -m pip install --upgrade pip && \
-    pip install -e ".[ml]"
+    pip install \
+      --index-url https://download.pytorch.org/whl/cpu \
+      --extra-index-url https://pypi.org/simple \
+      -e ".[ml]"
 
 EXPOSE 8000
 

@@ -797,6 +797,9 @@ async def test_use_up_my_pantry_assistant_handles_upstream_failure(client: Async
 
 
 def test_recipe_assistant_returns_inventory_guidance_without_llm_when_pantry_is_empty():
+    settings = recipe_assistant_service.get_settings()
+    settings.openai_assistant_preview_only = False
+
     class DummyUser:
         id = 999
 
@@ -811,6 +814,9 @@ def test_recipe_assistant_returns_inventory_guidance_without_llm_when_pantry_is_
 
 
 def test_recipe_assistant_can_prioritize_selected_ingredients_without_oldest_bias(monkeypatch: pytest.MonkeyPatch):
+    settings = recipe_assistant_service.get_settings()
+    monkeypatch.setattr(settings, "openai_assistant_preview_only", False)
+
     class DummyUser:
         id = 777
 
@@ -873,6 +879,9 @@ def test_recipe_assistant_can_prioritize_selected_ingredients_without_oldest_bia
 
 
 def test_recipe_assistant_oldest_toggle_only_reorders_perishables(monkeypatch: pytest.MonkeyPatch):
+    settings = recipe_assistant_service.get_settings()
+    monkeypatch.setattr(settings, "openai_assistant_preview_only", False)
+
     class DummyUser:
         id = 778
 
@@ -997,6 +1006,9 @@ async def test_recipe_question_answer_route_surfaces_upstream_failure(client: As
 
 
 def test_recipe_question_answer_filters_out_non_retrieved_recipe_ids(monkeypatch: pytest.MonkeyPatch):
+    settings = recipe_qa_service.get_settings()
+    monkeypatch.setattr(settings, "openai_rag_preview_only", False)
+
     class DummyUser:
         id = 779
 
@@ -1059,7 +1071,7 @@ def test_recipe_question_answer_filters_out_non_retrieved_recipe_ids(monkeypatch
         "app.services.recipe_qa.generate_recipe_question_answer",
         fake_generate_recipe_question_answer,
     )
-    monkeypatch.setattr(recipe_qa_service.get_settings(), "openai_rag_enabled", True)
+    monkeypatch.setattr(settings, "openai_rag_enabled", True)
 
     with SessionLocal() as db:
         result = build_recipe_question_answer(
@@ -1070,3 +1082,43 @@ def test_recipe_question_answer_filters_out_non_retrieved_recipe_ids(monkeypatch
 
     assert len(result.recipes) == 1
     assert result.recipes[0].recipe_id == allowed_recipe_id
+
+
+def test_recipe_assistant_preview_mode_returns_structured_shell(monkeypatch: pytest.MonkeyPatch):
+    settings = recipe_assistant_service.get_settings()
+    monkeypatch.setattr(settings, "openai_assistant_preview_only", True)
+    monkeypatch.setattr(settings, "openai_features_repo_url", "https://github.com/example/repo")
+
+    class DummyUser:
+        id = 780
+
+    with SessionLocal() as db:
+        result = build_recipe_assistant_response(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeAssistantUseUpRequest(user_goal="quick lunch"),
+        )
+
+    assert result.mode == "preview"
+    assert result.recipes == []
+    assert result.cta_url == "https://github.com/example/repo"
+
+
+def test_recipe_question_answer_preview_mode_returns_structured_shell(monkeypatch: pytest.MonkeyPatch):
+    settings = recipe_qa_service.get_settings()
+    monkeypatch.setattr(settings, "openai_rag_preview_only", True)
+    monkeypatch.setattr(settings, "openai_features_repo_url", "https://github.com/example/repo")
+
+    class DummyUser:
+        id = 781
+
+    with SessionLocal() as db:
+        result = build_recipe_question_answer(
+            db=db,
+            current_user=DummyUser(),
+            payload=RecipeQuestionAnswerRequest(question="What can I make with eggs?"),
+        )
+
+    assert result.mode == "preview"
+    assert result.recipes == []
+    assert result.cta_url == "https://github.com/example/repo"

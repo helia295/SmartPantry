@@ -32,6 +32,7 @@ For the product-level overview, see the repo root [README](../README.md).
 - query-time retrieval is pantry-aware and reranked before generation
 - generated answers are filtered so only retrieved recipe IDs survive
 - the v1 retrieval design uses one embedding document per recipe to keep indexing, debugging, and rollout simpler
+- preview mode can expose the UX shell safely on a public deployment without triggering paid OpenAI traffic
 
 ## Backend Structure
 
@@ -83,6 +84,11 @@ Build locally:
 cd backend
 docker build -t smartpantry-backend .
 ```
+
+Deployment note:
+
+- the Dockerfile is tuned for a CPU deployment target and installs PyTorch from the CPU wheel index
+- this avoids pulling unnecessary CUDA/NVIDIA packages into the EC2 image build
 
 Run locally:
 
@@ -137,14 +143,17 @@ Pantry assistant:
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `OPENAI_ASSISTANT_ENABLED`
+- `OPENAI_ASSISTANT_PREVIEW_ONLY`
 - `OPENAI_ASSISTANT_TIMEOUT_SECONDS`
 - `OPENAI_ASSISTANT_MAX_RECIPES`
 - `OPENAI_ASSISTANT_MAX_PANTRY_ITEMS`
 - `OPENAI_EMBEDDING_MODEL`
 - `OPENAI_RAG_ENABLED`
+- `OPENAI_RAG_PREVIEW_ONLY`
 - `OPENAI_RAG_TIMEOUT_SECONDS`
 - `OPENAI_RAG_MAX_RETRIEVALS`
 - `OPENAI_RAG_MAX_CONTEXT_RECIPES`
+- `OPENAI_FEATURES_REPO_URL`
 
 ## Data and Storage Model
 
@@ -211,6 +220,7 @@ Why this design:
 - avoids inventing new recipes or mutating application state
 - keeps cost and latency lower than sending the entire recipe corpus
 - makes the assistant easier to test because the route contract is structured JSON
+- allows a backend-controlled preview mode for public deployments that should show the workflow without spending live API credits
 
 ## Ask SmartPantry RAG Design
 
@@ -230,6 +240,7 @@ Why this design:
 - the model answers over recipe evidence rather than generic cooking knowledge
 - pantry-aware reranking keeps the feature aligned with the existing SmartPantry product loop
 - output filtering reduces hallucination risk and makes the response safer to render directly in the UI
+- preview mode can keep the public UX coherent even when the live generation path is intentionally disabled
 
 ## Recipe API Surface
 
@@ -299,6 +310,12 @@ Why this deployment shape:
 - avoids exposing backend secrets to the browser
 - allows the backend to mount a host-side model artifact into `/app/models` without baking large binaries into git
 
+Current public-demo posture:
+
+- the public deployment can run both AI recipe surfaces in preview mode
+- preview mode keeps the UI visible and explains how to self-host the real feature
+- the manual `Find Recipe` path remains available even when live AI is disabled
+
 ## Testing
 
 Run backend tests:
@@ -320,3 +337,4 @@ Important note:
 - no custom backend domain yet
 - detection still runs inline rather than via a dedicated worker or queue
 - Ask SmartPantry still needs a production rollout checklist: migration on Neon, embedding indexing against the deployed recipe dataset, backend env updates, and post-deploy smoke testing
+- the migration-first rollout is not fully enforced yet because startup `create_all()` remains enabled as a transitional safety net

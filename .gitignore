@@ -80,6 +80,11 @@ backend/storage/
 backend/data/
 backend/eval_*.json
 backend/*.pt
+backend/alembic_smoke.db
+backend/benchmark*.csv
+backend/benchmark*.json
+backend/runs/
+frontend/public/smartpantry-logo.png
 
 # Flask stuff:
 instance/

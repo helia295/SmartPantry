@@ -81,6 +81,10 @@ class Settings:
         self.openai_assistant_enabled: bool = (
             os.getenv("OPENAI_ASSISTANT_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
         )
+        self.openai_assistant_preview_only: bool = (
+            os.getenv("OPENAI_ASSISTANT_PREVIEW_ONLY", "false").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
         self.openai_assistant_timeout_seconds: int = int(
             os.getenv("OPENAI_ASSISTANT_TIMEOUT_SECONDS", "20")
         )
@@ -96,6 +100,10 @@ class Settings:
         self.openai_rag_enabled: bool = (
             os.getenv("OPENAI_RAG_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
         )
+        self.openai_rag_preview_only: bool = (
+            os.getenv("OPENAI_RAG_PREVIEW_ONLY", "false").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
         self.openai_rag_timeout_seconds: int = int(
             os.getenv("OPENAI_RAG_TIMEOUT_SECONDS", "25")
         )
@@ -104,6 +112,10 @@ class Settings:
         )
         self.openai_rag_max_context_recipes: int = int(
             os.getenv("OPENAI_RAG_MAX_CONTEXT_RECIPES", "5")
+        )
+        self.openai_features_repo_url: str = os.getenv(
+            "OPENAI_FEATURES_REPO_URL",
+            "https://github.com/heliadinh/SmartPantry",
         )
 
         # Lightweight in-memory rate limiting.
@@ -161,9 +173,9 @@ class Settings:
                 "STORAGE_PROVIDER is set to local. Production deployments should usually use object storage such as Cloudflare R2."
             )
 
-        if self.openai_assistant_enabled and not self.openai_api_key:
+        if (self.openai_assistant_enabled or self.openai_rag_enabled) and not self.openai_api_key:
             warnings.append(
-                "OPENAI_ASSISTANT_ENABLED is true but OPENAI_API_KEY is missing. The pantry assistant will be unavailable."
+                "OpenAI-backed features are enabled but OPENAI_API_KEY is missing. Assistant routes will be unavailable unless preview mode is enabled."
             )
 
         if not self.cors_origins:

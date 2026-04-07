@@ -12,7 +12,7 @@ from app.schemas.assistant import (
     RecipeAssistantUseUpRead,
     RecipeAssistantUseUpRequest,
 )
-from app.services.llm import generate_recipe_assistant_plan
+from app.services.llm import build_preview_assistant_response, generate_recipe_assistant_plan
 from app.services.recipes import canonicalize_ingredient_phrase, get_recipe_detail, parse_csv_terms, recommend_recipes
 
 
@@ -179,6 +179,9 @@ def build_recipe_assistant_response(
     payload: RecipeAssistantUseUpRequest,
 ) -> RecipeAssistantUseUpRead:
     settings = get_settings()
+    if settings.openai_assistant_preview_only:
+        return build_preview_assistant_response()
+
     pantry_items = (
         db.query(InventoryItem)
         .filter(InventoryItem.user_id == current_user.id)

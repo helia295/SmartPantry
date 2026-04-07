@@ -22,8 +22,12 @@ class RecipeAssistantSuggestionRead(BaseModel):
 
 
 class RecipeAssistantUseUpRead(BaseModel):
+    mode: str = "live"
     summary: str
     strategy_note: Optional[str] = None
+    availability_note: Optional[str] = None
+    cta_label: Optional[str] = None
+    cta_url: Optional[str] = None
     pantry_items_to_use_first: list[str] = []
     recipes: list[RecipeAssistantSuggestionRead] = []
 
@@ -43,7 +47,11 @@ class RecipeQuestionReferenceRead(BaseModel):
 
 
 class RecipeQuestionAnswerRead(BaseModel):
+    mode: str = "live"
     answer: str
     strategy_note: Optional[str] = None
+    availability_note: Optional[str] = None
+    cta_label: Optional[str] = None
+    cta_url: Optional[str] = None
     pantry_items_considered: list[str] = []
     recipes: list[RecipeQuestionReferenceRead] = []

@@ -12,7 +12,7 @@ SmartPantry is a full-stack, AI-assisted kitchen inventory app built around a hu
 - Recent upload history with thumbnail previews and retention cleanup
 - Inventory-aware recipe recommendations with feedback, favorites, and reusable hashtags
 - OpenAI-backed pantry assistant that explains which recipes best fit current inventory, mood, priority ingredients, and older perishables
-- RAG groundwork for Ask SmartPantry recipe Q&A with recipe embeddings stored in Postgres
+- Ask SmartPantry grounded recipe Q&A with recipe embeddings stored in Postgres
 - Pantry follow-through flow that lets users review inventory changes after cooking
 - Measured deployment and model-improvement benchmarks for both latency and detector quality
 
@@ -42,6 +42,7 @@ SmartPantry is a full-stack, AI-assisted kitchen inventory app built around a hu
 - Added recipe embeddings stored in Postgres and built an Ask SmartPantry flow for natural-language recipe questions
 - Implemented pantry-aware retrieval and reranking before generation so answers stay tied to actual recipe records
 - Constrained generated recipe references to retrieved candidate IDs instead of trusting freeform model output
+- Added preview-mode fallbacks so the public deployment can demonstrate the AI workflows without making live OpenAI requests
 
 ## Current Architecture
 
@@ -63,6 +64,7 @@ Key design choices:
 - Recipe ranking is deterministic and explainable.
 - The pantry assistant is additive: the backend still ranks recipe candidates deterministically first, then uses an LLM to explain and prioritize the best few options.
 - Ask SmartPantry uses a first-pass RAG design: embed recipe documents, retrieve semantically relevant candidates, rerank with pantry signals, and only then ask the LLM to synthesize an answer.
+- Public deployments can keep both AI surfaces in backend-controlled preview mode so users can understand the workflow without consuming live API budget.
 - Recipe follow-through is conservative and user-reviewed instead of silently inferred.
 
 Selected measured results:
@@ -87,11 +89,15 @@ Selected measured results:
 SmartPantry/
 ├── backend/               FastAPI API, models, services, scripts, tests
 ├── frontend/              Next.js App Router frontend
-├── docs/                  Private architecture/interview/deployment notes
 ├── .github/workflows/     CI configuration
 ├── .env.example           Shared environment reference
 └── README.md
 ```
+
+Local-only notes:
+
+- `docs/` is used for private architecture, deployment, and interview notes
+- it is intentionally git-ignored and not part of the public repository
 
 ## Local Development
 
@@ -151,14 +157,17 @@ Backend settings commonly needed in deployment:
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `OPENAI_ASSISTANT_ENABLED`
+- `OPENAI_ASSISTANT_PREVIEW_ONLY`
 - `OPENAI_ASSISTANT_TIMEOUT_SECONDS`
 - `OPENAI_ASSISTANT_MAX_RECIPES`
 - `OPENAI_ASSISTANT_MAX_PANTRY_ITEMS`
 - `OPENAI_EMBEDDING_MODEL`
 - `OPENAI_RAG_ENABLED`
+- `OPENAI_RAG_PREVIEW_ONLY`
 - `OPENAI_RAG_TIMEOUT_SECONDS`
 - `OPENAI_RAG_MAX_RETRIEVALS`
 - `OPENAI_RAG_MAX_CONTEXT_RECIPES`
+- `OPENAI_FEATURES_REPO_URL`
 
 Frontend:
 
@@ -188,6 +197,20 @@ RAG evaluation guidance:
 - check groundedness: generated recipe references should stay inside the retrieved candidate set
 - test fallback behavior for empty retrievals, upstream API failures, and restrictive user questions
 - treat latency, error rate, and per-request cost as production metrics, not just model-quality concerns
+
+Preview-mode option for public demos:
+
+- the pantry assistant and Ask SmartPantry can be switched into backend-controlled preview mode
+- preview mode returns a professional in-product shell and setup call-to-action without making live OpenAI requests
+- this is useful for public portfolio deployments when you want to demo the workflow without opening your API budget to unrestricted public usage
+
+Recommended public-demo settings:
+
+- `OPENAI_ASSISTANT_ENABLED=false`
+- `OPENAI_ASSISTANT_PREVIEW_ONLY=true`
+- `OPENAI_RAG_ENABLED=false`
+- `OPENAI_RAG_PREVIEW_ONLY=true`
+- `OPENAI_FEATURES_REPO_URL=<your GitHub repo URL>`
 
 ## Dataset Attribution
 

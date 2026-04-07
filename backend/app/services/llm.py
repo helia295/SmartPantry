@@ -137,8 +137,51 @@ Rules:
 """.strip()
 
 
+def _preview_cta() -> tuple[str, str]:
+    settings = get_settings()
+    return ("View setup guide on GitHub", settings.openai_features_repo_url)
+
+
+def build_preview_assistant_response() -> RecipeAssistantUseUpRead:
+    cta_label, cta_url = _preview_cta()
+    return RecipeAssistantUseUpRead(
+        mode="preview",
+        summary="This recipe copilot is shown in preview mode on the public deployment.",
+        strategy_note=(
+            "The live assistant is disabled here to avoid runaway API costs on a public demo."
+        ),
+        availability_note=(
+            "Use the Find Recipe button for manual recipe discovery on this public demo, or run SmartPantry locally with your own OpenAI keys to unlock the live assistant."
+        ),
+        cta_label=cta_label,
+        cta_url=cta_url,
+        pantry_items_to_use_first=[],
+        recipes=[],
+    )
+
+
+def build_preview_rag_response() -> RecipeQuestionAnswerRead:
+    cta_label, cta_url = _preview_cta()
+    return RecipeQuestionAnswerRead(
+        mode="preview",
+        answer="Ask SmartPantry is available in preview mode on the public deployment.",
+        strategy_note=(
+            "The live grounded answer flow is disabled here to avoid runaway API costs on a public demo."
+        ),
+        availability_note=(
+            "Use the Find Recipe button for manual recipe discovery on this public demo, or run the project locally with your own OpenAI keys to unlock the full grounded answer flow."
+        ),
+        cta_label=cta_label,
+        cta_url=cta_url,
+        pantry_items_considered=[],
+        recipes=[],
+    )
+
+
 def generate_recipe_assistant_plan(*, prompt_payload: dict[str, Any]) -> RecipeAssistantUseUpRead:
     settings = get_settings()
+    if settings.openai_assistant_preview_only:
+        return build_preview_assistant_response()
     if not settings.openai_assistant_enabled:
         raise RecipeAssistantUnavailableError("The pantry assistant is disabled.")
     if not settings.openai_api_key:
@@ -199,6 +242,8 @@ def generate_recipe_assistant_plan(*, prompt_payload: dict[str, Any]) -> RecipeA
 
 def generate_recipe_question_answer(*, prompt_payload: dict[str, Any]) -> RecipeQuestionAnswerRead:
     settings = get_settings()
+    if settings.openai_rag_preview_only:
+        return build_preview_rag_response()
     if not settings.openai_rag_enabled:
         raise RecipeQuestionAnswerUnavailableError("Recipe Q&A is disabled.")
     if not settings.openai_api_key:

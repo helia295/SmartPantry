@@ -18,6 +18,7 @@ from app.services.embeddings import (
 from app.services.llm import (
     RecipeQuestionAnswerUnavailableError,
     RecipeQuestionAnswerUpstreamError,
+    build_preview_rag_response,
     generate_recipe_question_answer,
 )
 from app.services.retrieval import retrieve_recipe_candidates
@@ -60,6 +61,8 @@ def build_recipe_question_answer(
     payload: RecipeQuestionAnswerRequest,
 ) -> RecipeQuestionAnswerRead:
     settings = get_settings()
+    if settings.openai_rag_preview_only:
+        return build_preview_rag_response()
     if not settings.openai_rag_enabled:
         raise RecipeQuestionAnswerUnavailableError("Recipe Q&A is disabled.")
 
