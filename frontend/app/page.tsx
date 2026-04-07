@@ -103,6 +103,40 @@ type RecipeQuestionAnswerResponse = {
   recipes: RecipeQuestionReference[];
 };
 
+function normalizeRecipeAssistantResponse(
+  payload: Partial<RecipeAssistantResponse>
+): RecipeAssistantResponse {
+  return {
+    mode: payload.mode ?? "live",
+    summary: payload.summary ?? "",
+    strategy_note: payload.strategy_note ?? null,
+    availability_note: payload.availability_note ?? null,
+    cta_label: payload.cta_label ?? null,
+    cta_url: payload.cta_url ?? null,
+    pantry_items_to_use_first: Array.isArray(payload.pantry_items_to_use_first)
+      ? payload.pantry_items_to_use_first
+      : [],
+    recipes: Array.isArray(payload.recipes) ? payload.recipes : [],
+  };
+}
+
+function normalizeRecipeQuestionResponse(
+  payload: Partial<RecipeQuestionAnswerResponse>
+): RecipeQuestionAnswerResponse {
+  return {
+    mode: payload.mode ?? "live",
+    answer: payload.answer ?? "",
+    strategy_note: payload.strategy_note ?? null,
+    availability_note: payload.availability_note ?? null,
+    cta_label: payload.cta_label ?? null,
+    cta_url: payload.cta_url ?? null,
+    pantry_items_considered: Array.isArray(payload.pantry_items_considered)
+      ? payload.pantry_items_considered
+      : [],
+    recipes: Array.isArray(payload.recipes) ? payload.recipes : [],
+  };
+}
+
 type AssistantIngredientOption = {
   value: string;
   label: string;
@@ -1577,7 +1611,7 @@ export default function Home() {
       return;
     }
 
-    const response = (await res.json()) as RecipeAssistantResponse;
+    const response = normalizeRecipeAssistantResponse((await res.json()) as Partial<RecipeAssistantResponse>);
     setAssistantResult(response);
     setAssistantLoading(false);
     showNotice(
@@ -1650,7 +1684,7 @@ export default function Home() {
       return;
     }
 
-    const response = (await res.json()) as RecipeQuestionAnswerResponse;
+    const response = normalizeRecipeQuestionResponse((await res.json()) as Partial<RecipeQuestionAnswerResponse>);
     setRecipeQuestionResult(response);
     setRecipeQuestionLoading(false);
     showNotice(
