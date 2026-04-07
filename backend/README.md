@@ -64,6 +64,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev,ml]"
+alembic upgrade head
 ```
 
 Run locally:
@@ -71,6 +72,11 @@ Run locally:
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
+
+Important note:
+
+- backend startup now assumes the schema is already provisioned
+- if you are on a fresh or outdated database, run `alembic upgrade head` before starting Uvicorn or the Docker container
 
 OpenAPI docs:
 
@@ -332,9 +338,8 @@ Important note:
 
 ## Current Hardening Gaps
 
-- Alembic is configured and the current production schema is stamped to the baseline revision, but startup `create_all()` is still enabled until deployment is tightened around `alembic upgrade head`
+- migration-first deployment is now the intended path, but rollout discipline matters because startup no longer creates tables for you
 - current rate limiting is in-memory rather than distributed
 - no custom backend domain yet
 - detection still runs inline rather than via a dedicated worker or queue
 - Ask SmartPantry still needs a production rollout checklist: migration on Neon, embedding indexing against the deployed recipe dataset, backend env updates, and post-deploy smoke testing
-- the migration-first rollout is not fully enforced yet because startup `create_all()` remains enabled as a transitional safety net

@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse
 from app.api import auth, detections, health, images, inventory, recipes
 from app.core.config import get_settings
 from app.core.rate_limit import InMemoryRateLimiter
-from app.db import Base, engine, ensure_sqlite_schema_compatibility
 from app.services.detection import preload_detection_backend
 from app.services.images import cleanup_expired_images_with_own_session
 
@@ -35,23 +34,12 @@ async def image_retention_worker(interval_seconds: int, batch_limit: int, stop_e
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """
-    Ensure database tables exist.
-
-    For the MVP we use simple auto-creation on startup against SQLite.
-    Later this can be replaced by migrations when we move to Postgres.
-    """
     settings = get_settings()
 
     for warning in settings.deployment_warnings():
         logger.warning("Deployment configuration warning: %s", warning)
 
-    logger.info("Startup: creating database tables.")
-    Base.metadata.create_all(bind=engine)
-    logger.info("Startup: database tables ready.")
-    logger.info("Startup: ensuring SQLite schema compatibility.")
-    ensure_sqlite_schema_compatibility()
-    logger.info("Startup: SQLite schema compatibility complete.")
+    logger.info("Startup: assuming database schema is already provisioned via Alembic.")
     logger.info("Startup: running expired image cleanup.")
     cleanup_expired_images_with_own_session(limit=settings.image_cleanup_batch_limit)
     logger.info("Startup: expired image cleanup complete.")

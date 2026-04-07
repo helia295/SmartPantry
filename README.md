@@ -108,6 +108,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev,ml]"
+alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -238,7 +239,7 @@ python scripts/import_recipes.py \
 ## Known Limits
 
 - Detection still runs inline on CPU rather than through a dedicated background worker
-- Alembic is configured and the current production schema is stamped to the baseline revision, but deployment still keeps startup table creation enabled until the migration-first rollout is fully enforced
+- Schema changes are now expected to go through Alembic first, so local and deployed environments must run `alembic upgrade head` before backend startup
 - Current rate limiting is in-memory and single-instance rather than distributed
 - Recipe recommendations are deterministic and rules-based rather than personalized by a learned ranking model
 - The pantry assistant and Ask SmartPantry are grounded and validated, but they are still advisory rather than sources of truth
