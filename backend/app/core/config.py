@@ -118,6 +118,16 @@ class Settings:
             "https://github.com/heliadinh/SmartPantry",
         )
 
+        # Recipe recommendation ranker configuration.
+        # Deterministic mode preserves the existing heuristic ranker.
+        # Learned mode enables the XGBoost reranker when the optional ranker
+        # dependencies and model artifact are available.
+        self.recipe_ranker_mode: str = os.getenv("RECIPE_RANKER_MODE", "deterministic").strip().lower()
+        self.recipe_ranker_model_path: str = os.getenv(
+            "RECIPE_RANKER_MODEL_PATH",
+            "artifacts/recipe_ranker.json",
+        )
+
         # Lightweight in-memory rate limiting.
         # This is intended as a practical deployment safeguard for a single-instance app.
         self.auth_rate_limit_requests: int = int(

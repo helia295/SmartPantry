@@ -34,6 +34,14 @@ For the product-level overview, see the repo root [README](../README.md).
 - the v1 retrieval design uses one embedding document per recipe to keep indexing, debugging, and rollout simpler
 - preview mode can expose the UX shell safely on a public deployment without triggering paid OpenAI traffic
 
+### Learned ranker milestone
+
+- deterministic candidate generation remains in place for filtering, pantry grounding, and fallback behavior
+- an optional XGBoost reranker can reorder candidate recipes on top of those deterministic features
+- offline training now uses a context-level holdout split and compares the learned model against the deterministic baseline
+- runtime learned ranking is config-gated so the deployed app can stay deterministic until the artifact and optional dependency set are intentionally enabled
+- on held-out validation contexts, the learned reranker improved `Hit@1` from `0.9563` to `0.9885` and `NDCG@5` from `0.9830` to `0.9957`
+
 ## Backend Structure
 
 ```text
@@ -67,6 +75,12 @@ pip install -e ".[dev,ml]"
 alembic upgrade head
 ```
 
+If you want to train or serve the learned recipe ranker locally, install the optional ranker extra too:
+
+```bash
+pip install -e ".[dev,ml,ranker]"
+```
+
 Run locally:
 
 ```bash
@@ -95,6 +109,7 @@ Deployment note:
 
 - the Dockerfile is tuned for a CPU deployment target and installs PyTorch from the CPU wheel index
 - this avoids pulling unnecessary CUDA/NVIDIA packages into the EC2 image build
+- the runtime image now also installs the optional `ranker` extra so the deployed backend can load the XGBoost reranker artifact when `RECIPE_RANKER_MODE=learned`
 
 Run locally:
 
@@ -160,6 +175,11 @@ Pantry assistant:
 - `OPENAI_RAG_MAX_RETRIEVALS`
 - `OPENAI_RAG_MAX_CONTEXT_RECIPES`
 - `OPENAI_FEATURES_REPO_URL`
+
+Learned recipe ranker:
+
+- `RECIPE_RANKER_MODE`
+- `RECIPE_RANKER_MODEL_PATH`
 
 ## Data and Storage Model
 
@@ -227,6 +247,30 @@ Why this design:
 - keeps cost and latency lower than sending the entire recipe corpus
 - makes the assistant easier to test because the route contract is structured JSON
 - allows a backend-controlled preview mode for public deployments that should show the workflow without spending live API credits
+
+## Learned Recipe Ranker Design
+
+The recommendation stack now has two ranking modes:
+
+1. deterministic mode
+2. learned reranker mode
+
+The shared flow is:
+
+1. load confirmed pantry inventory and user feedback
+2. generate candidate recipes with the existing deterministic filtering rules
+3. compute structured candidate features such as pantry overlap, missing ingredients, requested main-ingredient matches, time fit, and recipe metadata
+4. either:
+   - score candidates with the deterministic heuristic ranker, or
+   - score them with the XGBoost reranker if `RECIPE_RANKER_MODE=learned`
+5. fall back to deterministic scoring automatically if the learned model artifact or optional dependency is unavailable
+
+Why this design:
+
+- keeps the recommendation API stable for the frontend, pantry assistant, and RAG flows
+- avoids scoring the full recipe corpus online on a small CPU-only deployment target
+- preserves a safe deterministic path if the learned model fails to load
+- gives the model a real chance to improve ordering without weakening hard product constraints such as dislikes and time filtering
 
 ## Ask SmartPantry RAG Design
 

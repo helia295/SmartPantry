@@ -1,0 +1,31 @@
+{
+  "feature_names": [
+    "required_ingredient_count",
+    "inventory_match_count",
+    "match_ratio",
+    "missing_ingredient_count",
+    "main_ingredient_match_count",
+    "main_ingredient_present",
+    "main_ingredient_bonus",
+    "cuisine_bonus",
+    "time_bonus",
+    "overlap_bonus",
+    "recipe_total_minutes",
+    "recipe_rating",
+    "has_inventory"
+  ],
+  "training_examples": 62619,
+  "validation_examples": 15663,
+  "training_positive_labels": 20877,
+  "training_negative_labels": 41742,
+  "validation_positive_labels": 5221,
+  "validation_negative_labels": 10442,
+  "validation_fraction": 0.2,
+  "split_seed": 7,
+  "validation_metrics": {
+    "precision_at_3": 0.333333333333311,
+    "ndcg_at_5": 0.9957084707349448,
+    "hit_at_1": 0.9885079486688374,
+    "contexts": 5221
+  }
+}

@@ -14,6 +14,12 @@ type UserProfile = {
   timezone: string;
 };
 
+type ApiValidationErrorDetail = {
+  loc?: Array<string | number>;
+  msg?: string;
+  type?: string;
+};
+
 const FALLBACK_TIMEZONES = [
   "UTC",
   "America/New_York",
@@ -39,10 +45,42 @@ function getSupportedTimezones(): string[] {
   return FALLBACK_TIMEZONES;
 }
 
+function isLikelyValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function formatApiError(body: unknown): string {
+  if (!body || typeof body !== "object") return "Request failed";
+
+  const record = body as Record<string, unknown>;
+  if (typeof record.message === "string" && record.message.trim()) {
+    return record.message;
+  }
+  if (typeof record.detail === "string" && record.detail.trim()) {
+    return record.detail;
+  }
+  if (Array.isArray(record.detail)) {
+    const messages = record.detail
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const detail = item as ApiValidationErrorDetail;
+        const location = Array.isArray(detail.loc) ? detail.loc.slice(1).join(" ") : "";
+        const message = detail.msg?.trim();
+        if (!message) return null;
+        return location ? `${location}: ${message}` : message;
+      })
+      .filter((value): value is string => Boolean(value));
+    if (messages.length > 0) {
+      return messages.join(". ");
+    }
+  }
+  return "Please review your input and try again.";
+}
+
 async function parseError(res: Response): Promise<string> {
   try {
     const body = await res.json();
-    return body.detail || body.message || "Request failed";
+    return formatApiError(body);
   } catch {
     return `Request failed (${res.status})`;
   }
@@ -116,6 +154,10 @@ export default function AccountPage() {
     if (!token) return;
     setMessage(null);
     setError(null);
+    if (!isLikelyValidEmail(email.trim())) {
+      setError("Enter a valid email address before saving your account details.");
+      return;
+    }
 
     const res = await fetch(`${API_BASE}/auth/me`, {
       method: "PATCH",
@@ -227,6 +269,8 @@ export default function AccountPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     type="email"
+                    inputMode="email"
+                    autoComplete="email"
                     placeholder="Email"
                   />
 

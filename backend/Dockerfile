@@ -22,7 +22,7 @@ RUN python -m pip install --upgrade pip && \
     pip install \
       --index-url https://download.pytorch.org/whl/cpu \
       --extra-index-url https://pypi.org/simple \
-      -e ".[ml]"
+      -e ".[ml,ranker]"
 
 EXPOSE 8000
 

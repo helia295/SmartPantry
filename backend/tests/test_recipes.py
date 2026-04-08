@@ -9,6 +9,8 @@ from typing import Optional
 import app.api.recipes as recipe_routes
 import app.services.recipe_assistant as recipe_assistant_service
 import app.services.recipe_qa as recipe_qa_service
+import app.services.recommendation_ranker as recommendation_ranker_service
+from app.core.config import get_settings
 from app.db import Base, SessionLocal, engine, ensure_sqlite_schema_compatibility
 from app.main import app
 from app.models import (
@@ -22,6 +24,12 @@ from app.models import (
 )
 from app.schemas import RecipeAssistantUseUpRead
 from app.services.llm import RecipeAssistantUpstreamError, RecipeQuestionAnswerUpstreamError
+from app.services.ranking_dataset import build_bootstrap_ranking_examples
+from app.services.ranking_features import (
+    build_recipe_candidate_features,
+    score_recipe_candidate_deterministically,
+)
+from app.services.ranking_modeling import evaluate_grouped_ranking, split_rows_by_context
 from app.services.recipe_assistant import build_recipe_assistant_response
 from app.schemas.assistant import RecipeAssistantUseUpRequest, RecipeQuestionAnswerRead, RecipeQuestionAnswerRequest
 from app.services.recipe_qa import build_recipe_question_answer
@@ -213,6 +221,111 @@ async def test_recommendations_rank_highest_inventory_overlap(client: AsyncClien
     assert "basil" in body["results"][0]["missing_ingredients"]
 
 
+def test_recipe_candidate_feature_builder_matches_current_deterministic_logic():
+    recipe_id = seed_recipe(
+        title="Apple Oat Bowl",
+        slug="apple-oat-bowl-features",
+        total_minutes=10,
+        ingredients=["apple", "oats"],
+    )
+
+    with SessionLocal() as db:
+        recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+        ingredients = (
+            db.query(RecipeIngredient)
+            .filter(RecipeIngredient.recipe_id == recipe_id)
+            .order_by(RecipeIngredient.id.asc())
+            .all()
+        )
+        assert recipe is not None
+
+        features = build_recipe_candidate_features(
+            recipe=recipe,
+            recipe_ingredients=ingredients,
+            inventory_names={"apple"},
+            normalized_main_ingredients={"apple"},
+            normalized_cuisine=None,
+            max_total_minutes=None,
+        )
+
+    assert features["inventory_match_count"] == 1
+    assert features["required_ingredient_count"] == 2
+    assert features["missing_ingredient_count"] == 1
+    assert features["main_ingredient_match_count"] == 1
+    assert features["main_ingredient_present"] == 1
+    assert features["matched_ingredients"] == ["apple"]
+    assert features["missing_ingredients"] == ["oats"]
+    assert score_recipe_candidate_deterministically(features=features) == 10.75
+
+
+def test_bootstrap_ranking_examples_include_positive_and_negative_rows():
+    positive_recipe_id = seed_recipe(
+        title="Berry Yogurt Bowl",
+        slug="berry-yogurt-bowl-ranker",
+        total_minutes=8,
+        ingredients=["berries", "yogurt", "oats"],
+        rating=4.7,
+    )
+    seed_recipe(
+        title="Savory Rice Plate",
+        slug="savory-rice-plate-ranker",
+        total_minutes=25,
+        ingredients=["rice", "egg", "soy sauce"],
+        rating=4.1,
+    )
+
+    with SessionLocal() as db:
+        examples = build_bootstrap_ranking_examples(
+            db=db,
+            seed=11,
+            max_examples_per_recipe=1,
+            negatives_per_positive=1,
+        )
+
+    assert any(example.recipe_id == positive_recipe_id and example.label == 1 for example in examples)
+    assert any(example.label == 0 for example in examples)
+    assert all(example.context_id for example in examples)
+    assert all(example.source for example in examples)
+
+
+def test_context_level_split_keeps_contexts_disjoint():
+    rows = [
+        {"context_id": "ctx-1", "label": "1"},
+        {"context_id": "ctx-1", "label": "0"},
+        {"context_id": "ctx-2", "label": "1"},
+        {"context_id": "ctx-2", "label": "0"},
+        {"context_id": "ctx-3", "label": "1"},
+        {"context_id": "ctx-3", "label": "0"},
+    ]
+
+    train_rows, validation_rows = split_rows_by_context(rows, validation_fraction=0.34, seed=7)
+
+    train_contexts = {row["context_id"] for row in train_rows}
+    validation_contexts = {row["context_id"] for row in validation_rows}
+    assert train_contexts
+    assert validation_contexts
+    assert train_contexts.isdisjoint(validation_contexts)
+    assert train_contexts | validation_contexts == {"ctx-1", "ctx-2", "ctx-3"}
+
+
+def test_grouped_ranking_metrics_include_hit_at_1():
+    rows = [
+        {"context_id": "ctx-1", "label": "1"},
+        {"context_id": "ctx-1", "label": "0"},
+        {"context_id": "ctx-1", "label": "0"},
+        {"context_id": "ctx-2", "label": "1"},
+        {"context_id": "ctx-2", "label": "0"},
+    ]
+    scores = [0.9, 0.2, 0.1, 0.8, 0.3]
+
+    metrics = evaluate_grouped_ranking(rows=rows, scores=scores)
+
+    assert metrics["contexts"] == 2
+    assert metrics["hit_at_1"] == pytest.approx(1.0)
+    assert metrics["ndcg_at_5"] == pytest.approx(1.0)
+    assert metrics["precision_at_3"] == pytest.approx((1 / 3 + 1 / 2) / 2)
+
+
 @pytest.mark.asyncio
 async def test_recommendations_return_empty_when_no_overlap_exists_for_inventory(client: AsyncClient):
     token = await register_and_login(client)
@@ -312,6 +425,94 @@ async def test_main_ingredient_matches_are_prioritized_without_changing_total_ma
     focused_body = focused_res.json()
     assert focused_body["total_results"] == 2
     assert focused_body["results"][0]["recipe"]["title"] == "Skillet Corn Chowder"
+
+
+@pytest.mark.asyncio
+async def test_recommendations_can_use_learned_reranker_scores(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("RECIPE_RANKER_MODE", "learned")
+    get_settings.cache_clear()
+
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    user_id = get_user_id_from_token(token)
+
+    add_inventory_item(user_id, "chicken")
+
+    seed_recipe(
+        title="Chicken Soup",
+        slug="learned-ranker-chicken-soup",
+        total_minutes=20,
+        ingredients=["chicken", "broth", "carrot"],
+    )
+    seed_recipe(
+        title="Chicken Salad",
+        slug="learned-ranker-chicken-salad",
+        total_minutes=15,
+        ingredients=["chicken", "lettuce", "apple"],
+    )
+
+    monkeypatch.setattr(
+        recommendation_ranker_service,
+        "score_feature_rows_with_learned_ranker",
+        lambda _rows: [0.9, 0.2],
+    )
+
+    res = await client.get("/recipes/recommendations", headers=headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["results"][0]["recipe"]["title"] == "Chicken Salad"
+    assert body["results"][0]["score"] == pytest.approx(0.9)
+    assert body["results"][1]["score"] == pytest.approx(0.2)
+
+    recommendation_ranker_service.clear_ranker_model_cache()
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_recommendations_fall_back_to_deterministic_when_learned_ranker_unavailable(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("RECIPE_RANKER_MODE", "learned")
+    get_settings.cache_clear()
+
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    user_id = get_user_id_from_token(token)
+
+    add_inventory_item(user_id, "corn")
+    add_inventory_item(user_id, "orange")
+    add_inventory_item(user_id, "peach")
+
+    seed_recipe(
+        title="Orange Breakfast Bake",
+        slug="fallback-orange-breakfast-bake",
+        cuisine=None,
+        total_minutes=25,
+        tags=["breakfast"],
+        ingredients=["orange", "egg", "milk"],
+    )
+    seed_recipe(
+        title="Skillet Corn Chowder",
+        slug="fallback-skillet-corn-chowder",
+        cuisine=None,
+        total_minutes=30,
+        tags=["dinner"],
+        ingredients=["whole kernel corn", "milk", "onion"],
+    )
+
+    monkeypatch.setattr(
+        recommendation_ranker_service,
+        "score_feature_rows_with_learned_ranker",
+        lambda _rows: None,
+    )
+
+    res = await client.get("/recipes/recommendations?main_ingredients=corn", headers=headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["results"][0]["recipe"]["title"] == "Skillet Corn Chowder"
+
+    recommendation_ranker_service.clear_ranker_model_cache()
+    get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
