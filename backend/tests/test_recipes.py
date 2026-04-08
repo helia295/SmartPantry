@@ -516,6 +516,48 @@ async def test_recommendations_fall_back_to_deterministic_when_learned_ranker_un
 
 
 @pytest.mark.asyncio
+async def test_recommendations_empty_inventory_still_use_deterministic_fallback_in_learned_mode(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("RECIPE_RANKER_MODE", "learned")
+    get_settings.cache_clear()
+
+    token = await register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    seed_recipe(
+        title="Three Ingredient Toast",
+        slug="learned-empty-pantry-toast",
+        cuisine=None,
+        total_minutes=5,
+        tags=["breakfast"],
+        ingredients=["bread", "butter", "jam"],
+    )
+    seed_recipe(
+        title="Big Party Chili",
+        slug="learned-empty-pantry-chili",
+        cuisine=None,
+        total_minutes=90,
+        tags=["dinner"],
+        ingredients=["beans", "tomato", "onion", "garlic", "chili powder", "beef"],
+    )
+
+    monkeypatch.setattr(
+        recommendation_ranker_service,
+        "score_feature_rows_with_learned_ranker",
+        lambda _rows: [0.1, 0.9],
+    )
+
+    res = await client.get("/recipes/recommendations", headers=headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["results"][0]["recipe"]["title"] == "Three Ingredient Toast"
+
+    recommendation_ranker_service.clear_ranker_model_cache()
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
 async def test_recommendations_empty_inventory_fallback_prefers_simpler_recipes(client: AsyncClient):
     token = await register_and_login(client)
     headers = {"Authorization": f"Bearer {token}"}

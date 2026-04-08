@@ -605,7 +605,7 @@ def recommend_recipes(
             }
         )
 
-    learned_scores = score_feature_rows_with_learned_ranker(learned_feature_rows)
+    learned_scores = score_feature_rows_with_learned_ranker(learned_feature_rows) if inventory_names else None
     if learned_scores is not None:
         for row, learned_score in zip(ranked_results, learned_scores):
             row["score"] = learned_score
