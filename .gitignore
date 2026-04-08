@@ -84,6 +84,10 @@ backend/alembic_smoke.db
 backend/benchmark*.csv
 backend/benchmark*.json
 backend/runs/
+backend/artifacts/*
+!backend/artifacts/
+!backend/artifacts/recipe_ranker.json
+!backend/artifacts/recipe_ranker_metadata.json
 frontend/public/smartpantry-logo.png
 
 # Flask stuff:

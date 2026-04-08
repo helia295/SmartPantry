@@ -103,6 +103,12 @@ type RecipeQuestionAnswerResponse = {
   recipes: RecipeQuestionReference[];
 };
 
+type ApiValidationErrorDetail = {
+  loc?: Array<string | number>;
+  msg?: string;
+  type?: string;
+};
+
 function normalizeRecipeAssistantResponse(
   payload: Partial<RecipeAssistantResponse>
 ): RecipeAssistantResponse {
@@ -135,6 +141,38 @@ function normalizeRecipeQuestionResponse(
       : [],
     recipes: Array.isArray(payload.recipes) ? payload.recipes : [],
   };
+}
+
+function isLikelyValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function formatApiError(body: unknown): string {
+  if (!body || typeof body !== "object") return "Request failed";
+
+  const record = body as Record<string, unknown>;
+  if (typeof record.message === "string" && record.message.trim()) {
+    return record.message;
+  }
+  if (typeof record.detail === "string" && record.detail.trim()) {
+    return record.detail;
+  }
+  if (Array.isArray(record.detail)) {
+    const messages = record.detail
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const detail = item as ApiValidationErrorDetail;
+        const location = Array.isArray(detail.loc) ? detail.loc.slice(1).join(" ") : "";
+        const message = detail.msg?.trim();
+        if (!message) return null;
+        return location ? `${location}: ${message}` : message;
+      })
+      .filter((value): value is string => Boolean(value));
+    if (messages.length > 0) {
+      return messages.join(". ");
+    }
+  }
+  return "Please review your input and try again.";
 }
 
 type AssistantIngredientOption = {
@@ -541,12 +579,11 @@ export default function Home() {
   const handleSessionExpired = useCallback(() => {
     setUser(null);
     setDisplayName("");
-    setInventory([]);
     setEmail("");
     setPassword("");
     setAuthMode("login");
     showNotice("auth", "error", "Session expired due to inactivity. Please log in again.");
-    clearReviewState();
+    clearDashboardAuthState();
   }, []);
 
   const { token, setSessionToken, clearSessionToken } = useSlidingSession({
@@ -601,7 +638,10 @@ export default function Home() {
   }, [assistantIngredientPickerOpen]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      clearDashboardAuthState();
+      return;
+    }
     void loadCurrentUser();
     void loadInventory();
     void loadRecentUploads();
@@ -698,7 +738,7 @@ export default function Home() {
   async function parseError(res: Response): Promise<string> {
     try {
       const body = await res.json();
-      return body.detail || body.message || "Request failed";
+      return formatApiError(body);
     } catch {
       return `Request failed (${res.status})`;
     }
@@ -740,6 +780,10 @@ export default function Home() {
     const emailValue = email.trim();
     const displayNameValue = displayName.trim();
     const passwordValue = password;
+    if (!isLikelyValidEmail(emailValue)) {
+      showNotice("auth", "error", "Enter a valid email address before creating your account.");
+      return;
+    }
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -821,6 +865,56 @@ export default function Home() {
     setCameraWorkspaceOpen(false);
   }
 
+  function clearRecipeState() {
+    setShowRecipeFinder(false);
+    setRecipeMainIngredients("");
+    setRecipeMaxTotalMinutes("");
+    setRecipeResults([]);
+    setRecipesLoading(false);
+    setRecipePage(1);
+    setRecipeTotalPages(0);
+    setRecipeTotalResults(0);
+    setAssistantGoal("");
+    setAssistantMaxTotalMinutes("");
+    setAssistantPrioritizeOldest(true);
+    setAssistantPrioritizedIngredients([]);
+    setAssistantIngredientPickerOpen(false);
+    setAssistantLoading(false);
+    setAssistantResult(null);
+    setAssistantError(null);
+    setRecipeQuestion("");
+    setRecipeQuestionMaxMinutes("");
+    setRecipeQuestionLoading(false);
+    setRecipeQuestionResult(null);
+    setRecipeQuestionError(null);
+    setActiveRecipeIntelligencePanel(null);
+  }
+
+  function clearDashboardAuthState() {
+    setInventory([]);
+    setShowQuickAdd(false);
+    setInventoryFilter("All");
+    setEditingItemId(null);
+    setInventoryDraft(null);
+    setItemName("");
+    setItemQty("1");
+    setItemUnit(UNIT_OPTIONS[0].value);
+    setItemCategory(CATEGORY_OPTIONS[0].value);
+    setItemPerishable(false);
+    setPickedFiles((current) => {
+      current.forEach((entry) => URL.revokeObjectURL(entry.previewUrl));
+      return [];
+    });
+    stopCameraStream();
+    setCameraOpen(false);
+    setCameraError(null);
+    clearReviewState();
+    clearRecipeState();
+    clearNotice("inventory");
+    clearNotice("camera");
+    clearNotice("recipes");
+  }
+
   function stopCameraStream() {
     const stream = cameraStreamRef.current;
     if (!stream) return;
@@ -832,12 +926,11 @@ export default function Home() {
     clearSessionToken();
     setUser(null);
     setDisplayName("");
-    setInventory([]);
     setEmail("");
     setPassword("");
     setAuthMode("login");
     showNotice("auth", "info", "Logged out.");
-    clearReviewState();
+    clearDashboardAuthState();
   }
 
   async function loadInventory() {
@@ -1907,12 +2000,20 @@ export default function Home() {
                   placeholder="How should I call you?"
                 />
               )}
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+              />
               <input
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password"
                 type="password"
+                autoComplete={authMode === "register" ? "new-password" : "current-password"}
               />
               {authMode === "register" ? (
                 <button onClick={() => void register()}>Register</button>

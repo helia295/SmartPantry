@@ -449,6 +449,14 @@ def recommend_recipes(
     page: int = 1,
     page_size: int = 10,
 ) -> dict[str, Any]:
+    from app.core.config import get_settings
+    from app.services.ranking_features import (
+        build_recipe_candidate_features,
+        score_recipe_candidate_deterministically,
+    )
+    from app.services.recommendation_ranker import score_feature_rows_with_learned_ranker
+
+    settings = get_settings()
     normalized_main_ingredients = set(parse_csv_terms(main_ingredients))
     normalized_dietary_tags = set(parse_csv_terms(dietary_tags))
     normalized_cuisine = normalize_term(cuisine) if cuisine else None
@@ -540,6 +548,8 @@ def recommend_recipes(
         ingredients_by_recipe[ingredient.recipe_id].append(ingredient)
 
     ranked_results: list[dict[str, Any]] = []
+    learned_feature_rows: list[list[float]] = []
+    learned_feature_names: list[str] = []
     for recipe in recipes:
         recipe_tags = build_recipe_summary(recipe)["dietary_tags"]
         normalized_recipe_tags = {normalize_term(tag) for tag in recipe_tags if isinstance(tag, str)}
@@ -556,54 +566,27 @@ def recommend_recipes(
             if recipe.total_minutes > max_total_minutes:
                 continue
 
-        recipe_ingredients = ingredients_by_recipe.get(recipe.id, [])
-        required_ingredients = [
-            ingredient
-            for ingredient in recipe_ingredients
-            if not ingredient.is_optional and ingredient.ingredient_normalized
-        ]
-        required_names = [ingredient.ingredient_normalized for ingredient in required_ingredients]
-        matched_ingredients = sorted(
-            {name for name in required_names if ingredient_matches_any_term(name, inventory_names)}
+        features = build_recipe_candidate_features(
+            recipe=recipe,
+            recipe_ingredients=ingredients_by_recipe.get(recipe.id, []),
+            inventory_names=inventory_names,
+            normalized_main_ingredients=normalized_main_ingredients,
+            normalized_cuisine=normalized_cuisine,
+            max_total_minutes=max_total_minutes,
         )
-        missing_ingredients = sorted(
-            {name for name in required_names if not ingredient_matches_any_term(name, inventory_names)}
-        )
-
-        required_count = len(required_names)
-        match_count = len(matched_ingredients)
-        match_ratio = (match_count / required_count) if required_count else 0.0
-
-        main_ingredient_matches = len(
+        deterministic_score = score_recipe_candidate_deterministically(features=features)
+        if not learned_feature_names:
+            learned_feature_names = [
+                key
+                for key in features.keys()
+                if key not in {"matched_ingredients", "missing_ingredients"}
+            ]
+        learned_feature_rows.append(
             [
-                name
-                for name in normalized_main_ingredients
-                if any(ingredient_matches_term(matched_name, name) for matched_name in matched_ingredients)
+                float(features.get(name) or 0.0)
+                for name in learned_feature_names
             ]
         )
-        main_ingredient_present = 1 if main_ingredient_matches > 0 else 0
-        if normalized_main_ingredients:
-            main_ingredient_bonus = 6.0 * (main_ingredient_matches / len(normalized_main_ingredients))
-        else:
-            main_ingredient_bonus = 0.0
-
-        cuisine_bonus = 1.0 if normalized_cuisine and recipe_cuisine == normalized_cuisine else 0.0
-        time_bonus = 0.75 if max_total_minutes is not None and recipe.total_minutes is not None else 0.0
-
-        if not inventory_names:
-            base_score = -float(required_count or 999)
-            if recipe.total_minutes is not None:
-                base_score -= recipe.total_minutes / 1000.0
-        else:
-            overlap_bonus = 3.0 if match_count > 0 else -6.0
-            base_score = (
-                6.0 * match_ratio
-                - 1.25 * len(missing_ingredients)
-                + main_ingredient_bonus
-                + cuisine_bonus
-                + time_bonus
-                + overlap_bonus
-            )
 
         ranked_results.append(
             {
@@ -611,27 +594,46 @@ def recommend_recipes(
                     recipe,
                     current_feedback=feedback_by_recipe_id.get(recipe.id),
                 ),
-                "score": round(base_score, 4),
-                "inventory_match_count": match_count,
-                "required_ingredient_count": required_count,
-                "matched_ingredients": matched_ingredients,
-                "missing_ingredients": missing_ingredients,
-                "main_ingredient_match_count": main_ingredient_matches,
-                "main_ingredient_present": main_ingredient_present,
+                "score": deterministic_score,
+                "deterministic_score": deterministic_score,
+                "inventory_match_count": features["inventory_match_count"],
+                "required_ingredient_count": features["required_ingredient_count"],
+                "matched_ingredients": features["matched_ingredients"],
+                "missing_ingredients": features["missing_ingredients"],
+                "main_ingredient_match_count": features["main_ingredient_match_count"],
+                "main_ingredient_present": features["main_ingredient_present"],
             }
         )
 
-    ranked_results.sort(
-        key=lambda row: (
-            row["main_ingredient_present"],
-            row["main_ingredient_match_count"],
-            row["score"],
-            row["inventory_match_count"],
-            -(row["recipe"]["total_minutes"] if row["recipe"]["total_minutes"] is not None else 10**9),
-            row["recipe"]["title"],
-        ),
-        reverse=True,
-    )
+    learned_scores = score_feature_rows_with_learned_ranker(learned_feature_rows) if inventory_names else None
+    if learned_scores is not None:
+        for row, learned_score in zip(ranked_results, learned_scores):
+            row["score"] = learned_score
+            row["ranking_mode"] = settings.recipe_ranker_mode
+        ranked_results.sort(
+            key=lambda row: (
+                row["score"],
+                row["deterministic_score"],
+                row["inventory_match_count"],
+                -(row["recipe"]["total_minutes"] if row["recipe"]["total_minutes"] is not None else 10**9),
+                row["recipe"]["title"],
+            ),
+            reverse=True,
+        )
+    else:
+        for row in ranked_results:
+            row["ranking_mode"] = "deterministic"
+        ranked_results.sort(
+            key=lambda row: (
+                row["main_ingredient_present"],
+                row["main_ingredient_match_count"],
+                row["score"],
+                row["inventory_match_count"],
+                -(row["recipe"]["total_minutes"] if row["recipe"]["total_minutes"] is not None else 10**9),
+                row["recipe"]["title"],
+            ),
+            reverse=True,
+        )
     normalized_page_size = max(1, min(page_size, 50))
     normalized_page = max(1, page)
     total_results = len(ranked_results)
@@ -643,7 +645,17 @@ def recommend_recipes(
         "page_size": normalized_page_size,
         "total_results": total_results,
         "total_pages": total_pages,
-        "results": ranked_results[start_index:end_index],
+        "results": [
+            {
+                "recipe": row["recipe"],
+                "score": row["score"],
+                "inventory_match_count": row["inventory_match_count"],
+                "required_ingredient_count": row["required_ingredient_count"],
+                "matched_ingredients": row["matched_ingredients"],
+                "missing_ingredients": row["missing_ingredients"],
+            }
+            for row in ranked_results[start_index:end_index]
+        ],
     }
 
 

@@ -32,6 +32,10 @@ ml = [
     "pillow>=10.0.0",
     "ultralytics>=8.2.0",
 ]
+ranker = [
+    "scikit-learn>=1.5.0",
+    "xgboost>=2.1.0",
+]
 
 [build-system]
 requires = ["hatchling"]
