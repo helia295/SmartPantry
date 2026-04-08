@@ -121,6 +121,12 @@ alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
+If you want to train or serve the learned recipe ranker locally, install the optional ranker extra too:
+
+```bash
+pip install -e ".[dev,ml,ranker]"
+```
+
 Backend:
 
 - API root: `http://localhost:8000`

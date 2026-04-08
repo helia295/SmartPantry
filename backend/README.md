@@ -75,6 +75,8 @@ pip install -e ".[dev,ml]"
 alembic upgrade head
 ```
 
+That default install is enough for the deterministic recommender path and the rest of the backend.
+
 If you want to train or serve the learned recipe ranker locally, install the optional ranker extra too:
 
 ```bash
